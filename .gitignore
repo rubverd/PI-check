@@ -13,6 +13,11 @@ mobile/.gradle/
 mobile/build/
 mobile/app/build/
 mobile/local.properties
+.gradle/
+build/
+*/build/
+local.properties
+*.iml
 
 # APKs y resultados temporales
 *.apk
