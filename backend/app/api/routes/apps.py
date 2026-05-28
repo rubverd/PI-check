@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas.apps import AppSearchResponse
+from app.schemas.apps import AnalyzedAppsResponse, AppSearchResponse
 from app.services.google_play_service import (
     GooglePlaySearchError,
     search_google_play_apps,
@@ -52,3 +52,14 @@ def search_apps(
             status_code=500,
             detail=f"Error inesperado buscando aplicaciones: {exc}",
         )
+
+
+@router.get("/analyzed", response_model=AnalyzedAppsResponse)
+def get_analyzed_apps():
+    # La base de datos de aplicaciones analizadas todavía no está implementada.
+    # Se mantiene el endpoint para que el cliente Android use el flujo real de API
+    # y reciba una respuesta estable aunque la lista esté vacía.
+    return AnalyzedAppsResponse(
+        count=0,
+        results=[],
+    )
