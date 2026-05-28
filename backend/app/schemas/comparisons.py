@@ -11,6 +11,8 @@ class SelectedAppMetadata(BaseModel):
     score: Optional[float] = None
     genre: Optional[str] = None
     url: Optional[str] = None
+    version: Optional[str] = None
+    version_date: Optional[str] = None
 
 
 class ComparisonRequest(BaseModel):
