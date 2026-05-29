@@ -34,3 +34,7 @@ data/
 # Sistema
 .DS_Store
 Thumbs.db
+
+# APKs
+backend/artifacts/apks/*
+!backend/artifacts/apks/.gitkeep

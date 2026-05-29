@@ -35,4 +35,5 @@ class ComparisonRequestResponse(BaseModel):
     message: str
     app_a: SelectedAppMetadata
     app_b: SelectedAppMetadata
+    messages: list[str] = []
     apk_downloads: list[ApkDownloadInfo] = []

@@ -13,7 +13,7 @@ import java.net.URLEncoder
 import java.net.URL
 
 object PiCheckApiClient {
-    private const val BASE_URL = "http://10.0.2.2:8000"
+    private const val BASE_URL = "http://192.168.1.40:8000"
 
     suspend fun searchApps(query: String): List<PlayStoreApp> = withContext(Dispatchers.IO) {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
@@ -62,7 +62,7 @@ object PiCheckApiClient {
         val connection = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10_000
-            readTimeout = 10_000
+            readTimeout = 300_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
             setRequestProperty("Accept", "application/json")

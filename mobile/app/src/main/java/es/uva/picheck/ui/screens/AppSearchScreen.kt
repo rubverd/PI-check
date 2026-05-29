@@ -65,11 +65,15 @@ fun AppSearchScreen() {
     var apps by remember { mutableStateOf<List<PlayStoreApp>>(emptyList()) }
     var analyzedApps by remember { mutableStateOf<List<AnalyzedApp>>(emptyList()) }
     var selectedApps by remember { mutableStateOf<List<PlayStoreApp>>(emptyList()) }
+
     var isLoading by remember { mutableStateOf(false) }
     var isLoadingAnalyzed by remember { mutableStateOf(false) }
+    var showDownloadProgress by remember { mutableStateOf(false) }
+
     var statusMessage by remember {
-        mutableStateOf("Pantalla de inicio: selecciona dos aplicaciones para comparar.")
+        mutableStateOf("Selecciona dos aplicaciones para preparar su comparación.")
     }
+
     var analyzedStatus by remember {
         mutableStateOf("Cargando aplicaciones previamente analizadas...")
     }
@@ -79,6 +83,7 @@ fun AppSearchScreen() {
     LaunchedEffect(Unit) {
         isLoadingAnalyzed = true
         analyzedStatus = "Consultando API para aplicaciones analizadas..."
+
         analyzedApps = try {
             PiCheckApiClient.getAnalyzedApps().also {
                 analyzedStatus = if (it.isEmpty()) {
@@ -93,6 +98,23 @@ fun AppSearchScreen() {
         } finally {
             isLoadingAnalyzed = false
         }
+    }
+
+    if (showDownloadProgress && selectedApps.size == 2) {
+        AppDownloadProgressScreen(
+            appA = selectedApps[0],
+            appB = selectedApps[1],
+            onFinished = {
+                query = ""
+                apps = emptyList()
+                selectedApps = emptyList()
+                isLoading = false
+                showDownloadProgress = false
+                statusMessage = "Selecciona dos aplicaciones para preparar su comparación."
+            }
+        )
+
+        return
     }
 
     Scaffold(
@@ -118,7 +140,7 @@ fun AppSearchScreen() {
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item {
                 SelectedAppsPanel(
@@ -153,15 +175,6 @@ fun AppSearchScreen() {
                 items(analyzedApps, key = { it.appId }) { analyzedApp ->
                     AnalyzedAppCard(app = analyzedApp)
                 }
-            }
-
-            item {
-                Text(
-                    text = "Búsqueda de aplicaciones",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = PiCheckDarkText,
-                    fontWeight = FontWeight.Bold,
-                )
             }
 
             item {
@@ -203,15 +216,6 @@ fun AppSearchScreen() {
                 }
             }
 
-            item {
-                Text(
-                    text = "Seleccionadas: ${selectedApps.size}/2",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = PiCheckDarkText,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-
             if (isLoading) {
                 item {
                     CircularProgressIndicator(color = PiCheckBurgundy)
@@ -249,24 +253,7 @@ fun AppSearchScreen() {
                 Button(
                     onClick = {
                         if (selectedApps.size == 2) {
-                            coroutineScope.launch {
-                                isLoading = true
-                                statusMessage = "Enviando solicitud de comparación..."
-
-                                try {
-                                    val response = PiCheckApiClient.requestComparison(
-                                        appA = selectedApps[0],
-                                        appB = selectedApps[1],
-                                        downloadApks = false,
-                                    )
-
-                                    statusMessage = "Solicitud enviada correctamente:\n$response"
-                                } catch (exception: Exception) {
-                                    statusMessage = "Error solicitando comparación: ${exception.message}"
-                                } finally {
-                                    isLoading = false
-                                }
-                            }
+                            showDownloadProgress = true
                         }
                     },
                     enabled = selectedApps.size == 2 && !isLoading,
@@ -325,10 +312,37 @@ private fun AnalyzedAppCard(app: AnalyzedApp) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = app.name, fontWeight = FontWeight.Bold, color = PiCheckDarkText)
-                Text(text = "Versión: ${app.version}", style = MaterialTheme.typography.bodySmall, color = PiCheckDarkText)
-                Text(text = "Categoría: ${app.category}", style = MaterialTheme.typography.bodySmall, color = PiCheckDarkText)
-                Text(text = "Analizada: ${app.analysisDate}", style = MaterialTheme.typography.bodySmall, color = PiCheckDarkText)
+                Text(
+                    text = app.name,
+                    fontWeight = FontWeight.Bold,
+                    color = PiCheckDarkText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Text(
+                    text = "Versión: ${app.version}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = PiCheckDarkText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Text(
+                    text = "Categoría: ${app.category}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = PiCheckDarkText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Text(
+                    text = "Analizada: ${app.analysisDate}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = PiCheckDarkText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
 
             Text(
@@ -347,15 +361,6 @@ private fun SelectedAppsPanel(
     onRemove: (PlayStoreApp) -> Unit,
 ) {
     Column {
-        Text(
-            text = "Aplicaciones seleccionadas",
-            style = MaterialTheme.typography.titleSmall,
-            color = PiCheckDarkText,
-            fontWeight = FontWeight.Bold,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -391,7 +396,7 @@ private fun SelectedAppSlot(
     val hasApp = app != null
 
     Card(
-        modifier = modifier.height(122.dp),
+        modifier = modifier.height(130.dp),
         shape = RoundedCornerShape(18.dp),
         border = BorderStroke(
             width = 2.dp,
@@ -411,20 +416,52 @@ private fun SelectedAppSlot(
                     modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text(text = "App $position", color = PiCheckBlue, fontWeight = FontWeight.Bold)
-                    Text(text = "Sin seleccionar", style = MaterialTheme.typography.bodySmall, color = PiCheckDarkText)
+                    Text(
+                        text = "App $position",
+                        color = PiCheckBlue,
+                        fontWeight = FontWeight.Bold,
+                    )
+
+                    Text(
+                        text = "Sin seleccionar",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PiCheckDarkText,
+                    )
                 }
             } else {
                 Column(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .padding(top = 12.dp),
+                        .padding(top = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    AppIcon(app = app, size = 42)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(text = app.title, color = PiCheckDarkText, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(text = app.genre ?: "Categoría no disponible", style = MaterialTheme.typography.bodySmall, color = PiCheckDarkText)
+                    AppIcon(app = app, size = 34)
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = app.title,
+                        color = PiCheckDarkText,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Text(
+                        text = "Versión: ${app.version ?: "No disponible"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PiCheckDarkText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Text(
+                        text = " ${app.versionDate ?: "No disponible"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PiCheckDarkText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
 
                 if (onRemove != null) {
@@ -436,7 +473,11 @@ private fun SelectedAppSlot(
                             .align(Alignment.TopStart),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(text = "×", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "×",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
                 }
             }
@@ -460,16 +501,54 @@ private fun AppResultCard(
         border = BorderStroke(2.dp, borderColor),
         colors = CardDefaults.cardColors(containerColor = Color.White),
     ) {
-        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             AppIcon(app = app)
+
             Spacer(modifier = Modifier.size(12.dp))
+
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = app.title, fontWeight = FontWeight.Bold, color = PiCheckDarkText)
-                Text(text = "Categoría: ${app.genre ?: "No disponible"}", style = MaterialTheme.typography.bodySmall, color = PiCheckDarkText)
-                Text(text = "Fecha versión: ${app.versionDate ?: "No disponible"}", style = MaterialTheme.typography.bodySmall, color = PiCheckDarkText)
+                Text(
+                    text = app.title,
+                    fontWeight = FontWeight.Bold,
+                    color = PiCheckDarkText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Text(
+                    text = "Categoría: ${app.genre ?: "No disponible"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = PiCheckDarkText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Text(
+                    text = "Versión: ${app.version ?: "No disponible"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = PiCheckDarkText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Text(
+                    text = "Fecha versión: ${app.versionDate ?: "No disponible"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = PiCheckDarkText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
+
             if (isSelected) {
-                Text(text = "✓", color = PiCheckBurgundy, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "✓",
+                    color = PiCheckBurgundy,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
     }
