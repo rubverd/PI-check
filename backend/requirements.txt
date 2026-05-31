@@ -2,3 +2,8 @@ fastapi
 uvicorn[standard]
 pydantic
 google-play-scraper
+requests
+python-dotenv
+sqlalchemy
+psycopg[binary]
+alembic

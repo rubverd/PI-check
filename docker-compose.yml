@@ -1,0 +1,75 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: picheck-nginx
+    ports:
+      - "0.0.0.0:${PICHECK_HTTPS_PORT}:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+    networks:
+      - picheck-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: picheck-backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      MOBSF_URL: ${MOBSF_URL}
+      APK_TMP_DIR: ${APK_TMP_DIR}
+      MOBSF_REPORTS_DIR: ${MOBSF_REPORTS_DIR}
+      MASTG_REPORTS_DIR: ${MASTG_REPORTS_DIR}
+      COMPARISON_REPORTS_DIR: ${COMPARISON_REPORTS_DIR}
+      KEEP_APKS_AFTER_ANALYSIS: ${KEEP_APKS_AFTER_ANALYSIS}
+    ports:
+      - "127.0.0.1:${PICHECK_API_PORT}:8088"
+    volumes:
+      - ./backend/artifacts:/app/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mobsf:
+        condition: service_started
+    networks:
+      - picheck-network
+
+  mobsf:
+    image: opensecurity/mobile-security-framework-mobsf:latest
+    container_name: picheck-mobsf
+    ports:
+      - "${MOBSF_HOST_PORT}:8000"
+    shm_size: "2gb"
+    networks:
+      - picheck-network
+
+  postgres:
+    image: postgres:16
+    container_name: picheck-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_HOST_PORT}:5432"
+    volumes:
+      - picheck_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - picheck-network
+
+volumes:
+  picheck_postgres_data:
+
+networks:
+  picheck-network:
+    driver: bridge

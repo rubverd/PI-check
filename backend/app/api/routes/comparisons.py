@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -32,7 +33,12 @@ def request_comparison(request: ComparisonRequest):
         messages.append(f"Descargando APK de {request.app_a.title}.")
         messages.append(f"Descargando APK de {request.app_b.title}.")
 
-        base_output_dir = Path("artifacts") / "apks" / comparison_id
+        apk_tmp_dir = os.getenv(
+            "APK_TMP_DIR",
+        os.getenv("APK_OUTPUT_DIR", "artifacts/tmp/apks")
+        )
+
+        base_output_dir = Path(apk_tmp_dir) / comparison_id
 
         app_downloads = [
             (

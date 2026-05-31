@@ -4,7 +4,7 @@ import logging
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 
-from app.api.routes import apps, comparisons
+from app.api.routes import apps, comparisons, system
 
 
 logging.basicConfig(
@@ -18,7 +18,7 @@ logger = logging.getLogger("pi-check")
 app = FastAPI(
     title="PI-check API",
     description="Backend preliminar para la herramienta PI-check",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 
@@ -47,6 +47,7 @@ async def log_requests(request: Request, call_next):
 
 app.include_router(apps.router)
 app.include_router(comparisons.router)
+app.include_router(system.router)
 
 
 @app.get("/")
@@ -54,6 +55,7 @@ def root():
     return {
         "app": "PI-check API",
         "status": "running",
+        "version": "0.3.0",
     }
 
 
@@ -64,6 +66,7 @@ def health_check():
     return {
         "status": "ok",
         "service": "PI-check backend",
+        "version": "0.3.0",
     }
 
 

@@ -1,0 +1,13 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.env
+
+artifacts/apks/*
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
