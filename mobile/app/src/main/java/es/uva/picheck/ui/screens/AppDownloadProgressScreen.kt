@@ -1,11 +1,6 @@
 package es.uva.picheck.ui.screens
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -35,12 +30,13 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -63,9 +59,12 @@ fun AppDownloadProgressScreen(
     appB: PlayStoreApp,
     onFinished: () -> Unit,
 ) {
-    var progress by remember { mutableStateOf(0.05f) }
+    var progress by remember { mutableFloatStateOf(0.05f) }
+    var animationStep by remember { mutableIntStateOf(0) }
+
     var isFinished by remember { mutableStateOf(false) }
     var hasError by remember { mutableStateOf(false) }
+
     var statusMessage by remember { mutableStateOf("Preparando solicitud de comparación...") }
     var detailMessage by remember {
         mutableStateOf("Comprobando metadatos y preparando descarga de APKs.")
@@ -73,14 +72,23 @@ fun AppDownloadProgressScreen(
 
     val animatedProgress by animateFloatAsState(
         targetValue = progress.coerceIn(0f, 1f),
-        animationSpec = tween(durationMillis = 500),
+        animationSpec = tween(durationMillis = 700),
         label = "download_progress",
     )
 
+    LaunchedEffect(isFinished, hasError) {
+        if (!isFinished && !hasError) {
+            while (true) {
+                delay(1200)
+                animationStep = (animationStep + 1) % 3
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
-        val simulationJob = launch {
+        val progressJob = launch {
             while (!isFinished && progress < 0.86f) {
-                delay(1100)
+                delay(1300)
 
                 progress = when {
                     progress < 0.25f -> (progress + 0.045f).coerceAtMost(0.25f)
@@ -127,7 +135,7 @@ fun AppDownloadProgressScreen(
             statusMessage = "Error durante la descarga"
             detailMessage = exception.message ?: "Se produjo un error inesperado."
         } finally {
-            simulationJob.cancel()
+            progressJob.cancel()
         }
     }
 
@@ -179,6 +187,7 @@ fun AppDownloadProgressScreen(
             DownloadAnimationCard(
                 appA = appA,
                 appB = appB,
+                animationStep = animationStep,
                 isFinished = isFinished,
                 hasError = hasError,
             )
@@ -250,6 +259,7 @@ fun AppDownloadProgressScreen(
 private fun DownloadAnimationCard(
     appA: PlayStoreApp,
     appB: PlayStoreApp,
+    animationStep: Int,
     isFinished: Boolean,
     hasError: Boolean,
 ) {
@@ -261,7 +271,7 @@ private fun DownloadAnimationCard(
             containerColor = Color.White,
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = 4.dp,
+            defaultElevation = 3.dp,
         ),
     ) {
         Column(
@@ -279,7 +289,8 @@ private fun DownloadAnimationCard(
 
             Spacer(modifier = Modifier.height(28.dp))
 
-            ApkToFolderAnimation(
+            ApkToFolderStepAnimation(
+                animationStep = animationStep,
                 isFinished = isFinished,
                 hasError = hasError,
             )
@@ -327,37 +338,17 @@ private fun DownloadAppMiniCard(app: PlayStoreApp) {
 }
 
 @Composable
-private fun ApkToFolderAnimation(
+private fun ApkToFolderStepAnimation(
+    animationStep: Int,
     isFinished: Boolean,
     hasError: Boolean,
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "apk_folder_animation")
-
-    val apkOffset by infiniteTransition.animateFloat(
-        initialValue = -86f,
-        targetValue = 86f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = 1850,
-                easing = FastOutSlowInEasing,
-            ),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "apk_offset",
-    )
-
-    val apkAlpha by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.25f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = 1850,
-                easing = FastOutSlowInEasing,
-            ),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "apk_alpha",
-    )
+    val apkOffset = when {
+        isFinished || hasError -> 0.dp
+        animationStep == 0 -> (-78).dp
+        animationStep == 1 -> 0.dp
+        else -> 78.dp
+    }
 
     Box(
         modifier = Modifier
@@ -374,14 +365,12 @@ private fun ApkToFolderAnimation(
         AndroidApkIcon(
             modifier = Modifier
                 .align(Alignment.Center)
-                .offset(x = if (isFinished || hasError) 0.dp else apkOffset.dp)
-                .alpha(if (isFinished || hasError) 1f else apkAlpha),
+                .offset(x = apkOffset),
             isFinished = isFinished,
             hasError = hasError,
         )
     }
 }
-
 
 @Composable
 private fun AndroidApkIcon(
@@ -399,7 +388,6 @@ private fun AndroidApkIcon(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Antenas estilo Android
         Row(
             modifier = Modifier.size(width = 44.dp, height = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -418,7 +406,6 @@ private fun AndroidApkIcon(
             )
         }
 
-        // Cuerpo del icono
         Box(
             modifier = Modifier
                 .size(width = 66.dp, height = 62.dp)
