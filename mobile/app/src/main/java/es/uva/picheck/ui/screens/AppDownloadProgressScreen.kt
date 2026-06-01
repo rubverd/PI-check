@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import es.uva.picheck.data.model.ComparisonAnalysisResult
 import es.uva.picheck.data.model.PlayStoreApp
 import es.uva.picheck.data.remote.PiCheckApiClient
 import es.uva.picheck.ui.theme.PiCheckBackground
@@ -57,7 +58,8 @@ import kotlinx.coroutines.launch
 fun AppDownloadProgressScreen(
     appA: PlayStoreApp,
     appB: PlayStoreApp,
-    onFinished: () -> Unit,
+    onFinished: (ComparisonAnalysisResult) -> Unit,
+    onBack: () -> Unit,
 ) {
     var progress by remember { mutableFloatStateOf(0.05f) }
     var animationStep by remember { mutableIntStateOf(0) }
@@ -67,7 +69,7 @@ fun AppDownloadProgressScreen(
 
     var statusMessage by remember { mutableStateOf("Preparando solicitud de comparación...") }
     var detailMessage by remember {
-        mutableStateOf("Comprobando metadatos y preparando descarga de APKs.")
+        mutableStateOf("Comprobando metadatos y preparando análisis.")
     }
 
     val animatedProgress by animateFloatAsState(
@@ -87,34 +89,37 @@ fun AppDownloadProgressScreen(
 
     LaunchedEffect(Unit) {
         val progressJob = launch {
-            while (!isFinished && progress < 0.86f) {
-                delay(1300)
+            while (!isFinished && progress < 0.90f) {
+                delay(1400)
 
                 progress = when {
-                    progress < 0.25f -> (progress + 0.045f).coerceAtMost(0.25f)
-                    progress < 0.50f -> (progress + 0.035f).coerceAtMost(0.50f)
-                    progress < 0.72f -> (progress + 0.025f).coerceAtMost(0.72f)
-                    else -> (progress + 0.015f).coerceAtMost(0.86f)
+                    progress < 0.20f -> (progress + 0.040f).coerceAtMost(0.20f)
+                    progress < 0.42f -> (progress + 0.035f).coerceAtMost(0.42f)
+                    progress < 0.65f -> (progress + 0.025f).coerceAtMost(0.65f)
+                    progress < 0.82f -> (progress + 0.018f).coerceAtMost(0.82f)
+                    else -> (progress + 0.010f).coerceAtMost(0.90f)
                 }
 
                 statusMessage = when {
-                    progress < 0.25f -> "Registrando solicitud de comparación..."
-                    progress < 0.50f -> "Comprobando análisis previos..."
-                    progress < 0.72f -> "Descargando APKs en paralelo..."
-                    else -> "Esperando confirmación del backend..."
+                    progress < 0.20f -> "Registrando solicitud de comparación..."
+                    progress < 0.42f -> "Comprobando análisis previos..."
+                    progress < 0.65f -> "Descargando APKs si es necesario..."
+                    progress < 0.82f -> "Generando informes MobSF..."
+                    else -> "Construyendo comparativa..."
                 }
 
                 detailMessage = when {
-                    progress < 0.25f -> "Preparando los metadatos de las aplicaciones seleccionadas."
-                    progress < 0.50f -> "Sin análisis previo comprobado para ${appA.title} y ${appB.title}."
-                    progress < 0.72f -> "El backend está descargando los APKs de forma paralela."
-                    else -> "La descarga está en curso. La vista se completará cuando responda la API."
+                    progress < 0.20f -> "Enviando al backend las aplicaciones seleccionadas."
+                    progress < 0.42f -> "El backend comprueba si ya existen versiones analizadas."
+                    progress < 0.65f -> "Si no existe análisis previo, se descarga el APK correspondiente."
+                    progress < 0.82f -> "MobSF analiza las aplicaciones y genera informes JSON."
+                    else -> "La respuesta final se mostrará al completar el proceso."
                 }
             }
         }
 
         try {
-            PiCheckApiClient.requestComparison(
+            val result = PiCheckApiClient.requestComparison(
                 appA = appA,
                 appB = appB,
                 downloadApks = true,
@@ -123,16 +128,16 @@ fun AppDownloadProgressScreen(
             isFinished = true
             hasError = false
             progress = 1f
-            statusMessage = "Descarga completada"
-            detailMessage = "Los APKs han sido descargados por el backend. Volviendo al menú inicial..."
+            statusMessage = "Comparativa completada"
+            detailMessage = "La comparativa se ha generado correctamente."
 
-            delay(1800)
-            onFinished()
+            delay(900)
+            onFinished(result)
         } catch (exception: Exception) {
             isFinished = true
             hasError = true
             progress = 1f
-            statusMessage = "Error durante la descarga"
+            statusMessage = "Error durante la comparación"
             detailMessage = exception.message ?: "Se produjo un error inesperado."
         } finally {
             progressJob.cancel()
@@ -176,7 +181,7 @@ fun AppDownloadProgressScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "Descargando los APKs seleccionados para su posterior análisis.",
+                text = "Descargando, analizando y comparando las aplicaciones seleccionadas.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = PiCheckDarkText,
                 textAlign = TextAlign.Center,
@@ -229,7 +234,7 @@ fun AppDownloadProgressScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = PiCheckDarkText,
                 textAlign = TextAlign.Center,
-                maxLines = 3,
+                maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
             )
 
@@ -237,7 +242,7 @@ fun AppDownloadProgressScreen(
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
-                    onClick = onFinished,
+                    onClick = onBack,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = PiCheckBurgundy,
                         contentColor = Color.White,
@@ -420,23 +425,23 @@ private fun AndroidApkIcon(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(6.dp)
-                            .background(Color.White, RoundedCornerShape(3.dp))
+                            .size(8.dp)
+                            .background(Color.White, RoundedCornerShape(50))
                     )
 
                     Box(
                         modifier = Modifier
-                            .size(6.dp)
-                            .background(Color.White, RoundedCornerShape(3.dp))
+                            .size(8.dp)
+                            .background(Color.White, RoundedCornerShape(50))
                     )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = if (isFinished) "OK" else "APK",
+                    text = "APK",
                     color = Color.White,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.ExtraBold,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -456,31 +461,26 @@ private fun FolderIcon(
         else -> PiCheckCardBorder
     }
 
-    Box(
-        modifier = modifier.size(width = 102.dp, height = 76.dp),
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             modifier = Modifier
-                .size(width = 50.dp, height = 22.dp)
-                .align(Alignment.TopStart)
-                .background(
-                    folderColor,
-                    RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp),
-                ),
+                .size(width = 74.dp, height = 18.dp)
+                .background(folderColor, RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
         )
 
         Box(
             modifier = Modifier
-                .size(width = 102.dp, height = 58.dp)
-                .align(Alignment.BottomCenter)
+                .size(width = 98.dp, height = 64.dp)
                 .background(folderColor, RoundedCornerShape(14.dp)),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = if (isFinished) "✓" else "",
+                text = if (isFinished && !hasError) "✓" else "JSON",
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.headlineSmall,
             )
         }
     }

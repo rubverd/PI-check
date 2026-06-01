@@ -22,6 +22,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       MOBSF_URL: ${MOBSF_URL}
+      MOBSF_API_KEY: ${MOBSF_API_KEY}
       APK_TMP_DIR: ${APK_TMP_DIR}
       MOBSF_REPORTS_DIR: ${MOBSF_REPORTS_DIR}
       MASTG_REPORTS_DIR: ${MASTG_REPORTS_DIR}
@@ -42,6 +43,8 @@ services:
   mobsf:
     image: opensecurity/mobile-security-framework-mobsf:latest
     container_name: picheck-mobsf
+    environment:
+      MOBSF_API_KEY: ${MOBSF_API_KEY}
     ports:
       - "${MOBSF_HOST_PORT}:8000"
     shm_size: "2gb"

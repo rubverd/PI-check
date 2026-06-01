@@ -1,10 +1,15 @@
 package es.uva.picheck.data.remote
 
 import es.uva.picheck.data.model.AnalyzedApp
+import es.uva.picheck.data.model.ComparisonAnalysisResult
 import es.uva.picheck.data.model.IntegrationModel
+import es.uva.picheck.data.model.MobSFReportInfo
 import es.uva.picheck.data.model.PlayStoreApp
+import es.uva.picheck.data.model.VersionAppInfo
+import es.uva.picheck.data.model.VersionReportInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.OutputStreamWriter
@@ -30,13 +35,14 @@ object PiCheckApiClient {
         appA: PlayStoreApp,
         appB: PlayStoreApp,
         downloadApks: Boolean,
-    ): String = withContext(Dispatchers.IO) {
+    ): ComparisonAnalysisResult = withContext(Dispatchers.IO) {
         val body = JSONObject()
             .put("app_a", appA.toComparisonJson())
             .put("app_b", appB.toComparisonJson())
             .put("download_apks", downloadApks)
 
-        post("/api/comparisons/request", body).toString(2)
+        val response = post("/api/comparisons/request", body)
+        response.toComparisonAnalysisResult()
     }
 
     suspend fun getAnalyzedApps(): List<AnalyzedApp> = withContext(Dispatchers.IO) {
@@ -62,7 +68,7 @@ object PiCheckApiClient {
         val connection = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10_000
-            readTimeout = 300_000
+            readTimeout = 600_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
             setRequestProperty("Accept", "application/json")
@@ -109,10 +115,52 @@ object PiCheckApiClient {
         category = getString("category"),
         analysisDate = getString("analysis_date"),
         integrationModel = when (getString("integration_model")) {
-            "health_connect" -> IntegrationModel.HEALTH_CONNECT
+            "health_connect", "HEALTH_CONNECT" -> IntegrationModel.HEALTH_CONNECT
             else -> IntegrationModel.LEGACY
         },
     )
+
+    private fun JSONObject.toComparisonAnalysisResult(): ComparisonAnalysisResult =
+        ComparisonAnalysisResult(
+            comparisonId = getString("comparison_id"),
+            status = getString("status"),
+            message = getString("message"),
+            messages = getJSONArray("messages").toStringList(),
+            appA = getJSONObject("app_a").toVersionReportInfo(),
+            appB = getJSONObject("app_b").toVersionReportInfo(),
+            idIndiceAplicado = optNullableString("id_indice_aplicado"),
+            rawJson = toString(2),
+        )
+
+    private fun JSONObject.toVersionReportInfo(): VersionReportInfo =
+        VersionReportInfo(
+            versionApp = getJSONObject("version_app").toVersionAppInfo(),
+            mobsfReport = getJSONObject("mobsf_report").toMobSFReportInfo(),
+        )
+
+    private fun JSONObject.toVersionAppInfo(): VersionAppInfo =
+        VersionAppInfo(
+            idApp = getString("id_app"),
+            version = getString("version"),
+            versionCode = optNullableInt("version_code"),
+            fechaVersion = optNullableString("fecha_version"),
+            categoria = optNullableString("categoria"),
+            modeloIntegracion = getString("modelo_integracion"),
+            apkSha256 = optNullableString("apk_sha256"),
+            estadoMobsf = getString("estado_mobsf"),
+            hashMobsf = optNullableString("hash_mobsf"),
+            rutaInformeMobsf = optNullableString("ruta_informe_mobsf"),
+        )
+
+    private fun JSONObject.toMobSFReportInfo(): MobSFReportInfo =
+        MobSFReportInfo(
+            available = optBoolean("available", false),
+            hashMobsf = optNullableString("hash_mobsf"),
+            rutaInforme = optNullableString("ruta_informe"),
+            fileName = optNullableString("file_name"),
+            scanType = optNullableString("scan_type"),
+            jsonReportRaw = optNullableJsonAsPrettyString("json_report"),
+        )
 
     private fun PlayStoreApp.toComparisonJson(): JSONObject = JSONObject()
         .put("app_id", appId)
@@ -125,15 +173,33 @@ object PiCheckApiClient {
         .putNullable("version", version)
         .putNullable("version_date", versionDate)
 
+    private fun JSONArray.toStringList(): List<String> =
+        List(length()) { index -> optString(index) }
+
     private fun JSONObject.putNullable(name: String, value: Any?): JSONObject =
         put(name, value ?: JSONObject.NULL)
 
     private fun JSONObject.optNullableString(name: String): String? =
-        if (isNull(name)) null else optString(name)
+        if (!has(name) || isNull(name)) null else optString(name)
 
     private fun JSONObject.optNullableDouble(name: String): Double? =
-        if (isNull(name)) null else optDouble(name)
+        if (!has(name) || isNull(name)) null else optDouble(name)
 
     private fun JSONObject.optNullableBoolean(name: String): Boolean? =
-        if (isNull(name)) null else optBoolean(name)
+        if (!has(name) || isNull(name)) null else optBoolean(name)
+
+    private fun JSONObject.optNullableInt(name: String): Int? =
+        if (!has(name) || isNull(name)) null else optInt(name)
+
+    private fun JSONObject.optNullableJsonAsPrettyString(name: String): String? {
+        if (!has(name) || isNull(name)) {
+            return null
+        }
+
+        return when (val value = get(name)) {
+            is JSONObject -> value.toString(2)
+            is JSONArray -> value.toString(2)
+            else -> value.toString()
+        }
+    }
 }

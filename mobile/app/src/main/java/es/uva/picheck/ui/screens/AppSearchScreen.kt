@@ -59,6 +59,7 @@ import es.uva.picheck.ui.theme.PiCheckBlue
 import es.uva.picheck.ui.theme.PiCheckBurgundy
 import es.uva.picheck.ui.theme.PiCheckCardBorder
 import es.uva.picheck.ui.theme.PiCheckDarkText
+import es.uva.picheck.data.model.ComparisonAnalysisResult
 import kotlinx.coroutines.launch
 
 private val ElectricBlue = Color(0xFF2D5BFF)
@@ -77,6 +78,8 @@ fun AppSearchScreen() {
     var apps by remember { mutableStateOf<List<PlayStoreApp>>(emptyList()) }
     var analyzedApps by remember { mutableStateOf<List<AnalyzedApp>>(emptyList()) }
     var selectedApps by remember { mutableStateOf<List<PlayStoreApp>>(emptyList()) }
+
+    var comparisonResult by remember { mutableStateOf<ComparisonAnalysisResult?>(null) }
 
     var isLoadingSearch by remember { mutableStateOf(false) }
     var isLoadingAnalyzed by remember { mutableStateOf(false) }
@@ -130,12 +133,12 @@ fun AppSearchScreen() {
             isLoadingAnalyzed = false
         }
     }
-
-    if (showDownloadProgress && selectedApps.size == 2) {
-        AppDownloadProgressScreen(
-            appA = selectedApps[0],
-            appB = selectedApps[1],
-            onFinished = {
+    
+    if (comparisonResult != null) {
+        ComparisonResultScreen(
+            result = comparisonResult!!,
+            onNewComparison = {
+                comparisonResult = null
                 query = ""
                 apps = emptyList()
                 selectedApps = emptyList()
@@ -143,7 +146,24 @@ fun AppSearchScreen() {
                 isLoadingSearch = false
                 showDownloadProgress = false
                 statusMessage = "Selecciona dos aplicaciones para preparar su comparación."
-            }
+            },
+        )
+
+        return
+    }
+
+    if (showDownloadProgress && selectedApps.size == 2) {
+        AppDownloadProgressScreen(
+            appA = selectedApps[0],
+            appB = selectedApps[1],
+            onFinished = { result ->
+                comparisonResult = result
+                showDownloadProgress = false
+            },
+            onBack = {
+                showDownloadProgress = false
+                statusMessage = "Selecciona dos aplicaciones para preparar su comparación."
+            },
         )
 
         return

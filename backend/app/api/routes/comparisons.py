@@ -1,16 +1,25 @@
-import os
-from pathlib import Path
-from uuid import uuid4
+import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
-from app.infrastructure.external.apkeep_client import download_apks_with_apkeep_in_parallel
+from app.application.services.app_analysis_service import AppAnalysisError
+from app.application.services.comparison_service import (
+    ComparisonExecutionResult,
+    ComparisonService,
+)
+from app.domain.entities.version_report import VersionReport
+from app.infrastructure.database.session import get_db_session
 from app.schemas.comparisons import (
-    ApkDownloadInfo,
+    ComparisonAnalysisResponse,
     ComparisonRequest,
-    ComparisonRequestResponse,
+    MobSFReportInfo,
+    VersionAppInfo,
+    VersionReportInfo,
 )
 
+
+logger = logging.getLogger("pi-check")
 
 router = APIRouter(
     prefix="/api/comparisons",
@@ -18,66 +27,83 @@ router = APIRouter(
 )
 
 
-@router.post("/request", response_model=ComparisonRequestResponse)
-def request_comparison(request: ComparisonRequest):
-    comparison_id = str(uuid4())
+@router.post("/request", response_model=ComparisonAnalysisResponse)
+def request_comparison(
+    request: ComparisonRequest,
+    db: Session = Depends(get_db_session),
+):
+    comparison_service = ComparisonService(db)
 
-    messages: list[str] = [
-        f"Solicitud de comparación creada con identificador {comparison_id}.",
-        f"Sin análisis previo comprobado para {request.app_a.title}.",
-        f"Sin análisis previo comprobado para {request.app_b.title}.",
-    ]
+    try:
+        result = comparison_service.create_comparison(request)
+        db.commit()
 
-    apk_downloads: list[ApkDownloadInfo] = []
+        return _to_response(result)
 
-    if request.download_apks:
-        messages.append(f"Descargando APK de {request.app_a.title}.")
-        messages.append(f"Descargando APK de {request.app_b.title}.")
+    except AppAnalysisError as exc:
+        db.rollback()
 
-        apk_tmp_dir = os.getenv(
-            "APK_TMP_DIR",
-            os.getenv("APK_OUTPUT_DIR", "artifacts/tmp/apks"),
+        logger.exception("Error controlado creando comparativa")
+
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
         )
 
-        base_output_dir = Path(apk_tmp_dir) / comparison_id
+    except Exception as exc:
+        db.rollback()
 
-        app_downloads = [
-            (
-                request.app_a.app_id,
-                base_output_dir / request.app_a.app_id,
-            ),
-            (
-                request.app_b.app_id,
-                base_output_dir / request.app_b.app_id,
-            ),
-        ]
+        logger.exception("Error inesperado creando comparativa")
 
-        apk_downloads = download_apks_with_apkeep_in_parallel(
-            app_downloads=app_downloads,
-            source="apk-pure",
-            timeout_seconds=300,
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error inesperado creando comparativa: {exc}",
         )
 
-        if all(download.success for download in apk_downloads):
-            status = "apks_downloaded"
-            message = "Solicitud de comparación registrada y APKs descargados correctamente."
-            messages.append("Ambas descargas finalizaron correctamente.")
-        else:
-            status = "apk_download_error"
-            message = "La solicitud se registró, pero se produjo algún error durante la descarga de APKs."
-            messages.append("Al menos una descarga no finalizó correctamente.")
 
-    else:
-        status = "requested"
-        message = "Solicitud de comparación registrada correctamente. La descarga de APKs no fue solicitada."
-        messages.append("Descarga de APKs omitida porque download_apks=false.")
+def _to_response(
+    result: ComparisonExecutionResult,
+) -> ComparisonAnalysisResponse:
+    return ComparisonAnalysisResponse(
+        comparison_id=result.comparison_id,
+        status=result.status,
+        message=result.message,
+        messages=result.messages,
+        app_a=_version_report_to_response(result.comparison.app_a),
+        app_b=_version_report_to_response(result.comparison.app_b),
+        id_indice_aplicado=result.comparison.id_indice_aplicado,
+    )
 
-    return ComparisonRequestResponse(
-        comparison_id=comparison_id,
-        status=status,
-        message=message,
-        app_a=request.app_a,
-        app_b=request.app_b,
-        messages=messages,
-        apk_downloads=apk_downloads,
+
+def _version_report_to_response(
+    version_report: VersionReport,
+) -> VersionReportInfo:
+    version_app = version_report.version_app
+    mobsf_report = version_report.mobsf_report
+
+    return VersionReportInfo(
+        version_app=VersionAppInfo(
+            id_app=version_app.id_app,
+            version=version_app.version,
+            version_code=version_app.version_code,
+            fecha_version=(
+                version_app.fecha_version.isoformat()
+                if version_app.fecha_version
+                else None
+            ),
+            categoria=version_app.categoria,
+            modelo_integracion=version_app.modelo_integracion.value,
+            apk_sha256=version_app.apk_sha256,
+            estado_mobsf=version_app.estado_mobsf.value,
+            hash_mobsf=version_app.hash_mobsf,
+            ruta_informe_mobsf=version_app.ruta_informe_mobsf,
+        ),
+        mobsf_report=MobSFReportInfo(
+            available=mobsf_report is not None,
+            hash_mobsf=mobsf_report.hash_mobsf if mobsf_report else None,
+            ruta_informe=mobsf_report.ruta_informe if mobsf_report else None,
+            file_name=mobsf_report.file_name if mobsf_report else None,
+            scan_type=mobsf_report.scan_type if mobsf_report else None,
+            json_report=mobsf_report.json_report if mobsf_report else None,
+        ),
     )
