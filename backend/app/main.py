@@ -4,12 +4,12 @@ import logging
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
 
-from app.api.routes import apps, comparisons, system
+from app.api.router import api_router
 
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
+    format="%(asctime)s | %(levelname)s | %(message)s",
 )
 
 logger = logging.getLogger("pi-check")
@@ -45,9 +45,7 @@ async def log_requests(request: Request, call_next):
     return response
 
 
-app.include_router(apps.router)
-app.include_router(comparisons.router)
-app.include_router(system.router)
+app.include_router(api_router)
 
 
 @app.get("/")

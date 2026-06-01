@@ -2,11 +2,12 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query
 
-from app.schemas.apps import AnalyzedAppsResponse, AppSearchResponse
-from app.services.google_play_service import (
+from app.infrastructure.external.google_play_client import (
     GooglePlaySearchError,
     search_google_play_apps,
 )
+from app.schemas.apps import AnalyzedAppsResponse, AppSearchResponse
+
 
 logger = logging.getLogger("pi-check")
 

@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.persistence.database import get_db_session
-from app.services.mobsf_service import check_mobsf_health
+from app.infrastructure.database.session import get_db_session
+from app.infrastructure.external.mobsf_client import check_mobsf_health
 
 
 router = APIRouter(

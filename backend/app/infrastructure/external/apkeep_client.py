@@ -68,7 +68,7 @@ def download_apk_with_apkeep(
             success=False,
             output_dir=str(output_dir),
             apk_files=[],
-            error="No se ha encontrado el comando 'apkeep'. Comprueba que está instalado en WSL.",
+            error="No se ha encontrado el comando 'apkeep'. Comprueba que está instalado en la imagen Docker del backend.",
         )
 
     except subprocess.TimeoutExpired:

@@ -4,12 +4,13 @@ from uuid import uuid4
 
 from fastapi import APIRouter
 
+from app.infrastructure.external.apkeep_client import download_apks_with_apkeep_in_parallel
 from app.schemas.comparisons import (
     ApkDownloadInfo,
     ComparisonRequest,
     ComparisonRequestResponse,
 )
-from app.services.apk_download_service import download_apks_with_apkeep_in_parallel
+
 
 router = APIRouter(
     prefix="/api/comparisons",
@@ -35,7 +36,7 @@ def request_comparison(request: ComparisonRequest):
 
         apk_tmp_dir = os.getenv(
             "APK_TMP_DIR",
-        os.getenv("APK_OUTPUT_DIR", "artifacts/tmp/apks")
+            os.getenv("APK_OUTPUT_DIR", "artifacts/tmp/apks"),
         )
 
         base_output_dir = Path(apk_tmp_dir) / comparison_id
