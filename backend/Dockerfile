@@ -22,8 +22,13 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY alembic.ini .
+COPY alembic ./alembic
 
-RUN mkdir -p /app/artifacts/apks
+RUN mkdir -p /app/artifacts/tmp/apks \
+    && mkdir -p /app/artifacts/reports/mobsf \
+    && mkdir -p /app/artifacts/reports/mastg \
+    && mkdir -p /app/artifacts/reports/comparisons
 
 EXPOSE 8088
 

@@ -50,3 +50,6 @@ backend/artifacts/tmp/apks/
 backend/artifacts/reports/mobsf/
 backend/artifacts/reports/mastg/
 backend/artifacts/reports/comparisons/
+
+__pycache__/
+*.pyc
