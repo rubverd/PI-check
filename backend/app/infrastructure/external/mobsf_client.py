@@ -14,6 +14,7 @@ load_dotenv()
 
 MOBSF_URL = os.getenv("MOBSF_URL", "http://localhost:8001").rstrip("/")
 MOBSF_API_KEY = os.getenv("MOBSF_API_KEY", "").strip()
+MOBSF_TIMEOUT_SECONDS = int(os.getenv("MOBSF_TIMEOUT_SECONDS", "1800"))
 
 logger = logging.getLogger("pi-check")
 
@@ -26,7 +27,7 @@ class MobSFClient:
         self,
         mobsf_url: str = MOBSF_URL,
         api_key: str = MOBSF_API_KEY,
-        timeout_seconds: int = 600,
+        timeout_seconds: int = MOBSF_TIMEOUT_SECONDS,
     ):
         self.mobsf_url = mobsf_url.rstrip("/")
         self.api_key = api_key
@@ -109,22 +110,62 @@ class MobSFClient:
             raise MobSFClientError(f"No existe el archivo APK: {apk_path}")
 
         url = f"{self.mobsf_url}/api/v1/upload"
+        last_response: requests.Response | None = None
 
-        with apk_path.open("rb") as file:
-            response = requests.post(
-                url,
-                headers=self._headers(),
-                files={
-                    "file": (
-                        apk_path.name,
-                        file,
-                        self._content_type_for(apk_path),
-                    )
-                },
-                timeout=self.timeout_seconds,
+        for content_type in self._candidate_content_types_for(apk_path):
+            with apk_path.open("rb") as file:
+                if content_type is None:
+                    files = {
+                        "file": (
+                            apk_path.name,
+                            file,
+                        )
+                    }
+                    content_type_label = "sin Content-Type explícito"
+                else:
+                    files = {
+                        "file": (
+                            apk_path.name,
+                            file,
+                            content_type,
+                        )
+                    }
+                    content_type_label = content_type
+
+                logger.info(
+                    "MobSF: intentando subida de %s con Content-Type=%s",
+                    apk_path.name,
+                    content_type_label,
+                )
+
+                response = requests.post(
+                    url,
+                    headers=self._headers(),
+                    files=files,
+                    timeout=self.timeout_seconds,
+                )
+
+            if response.status_code < 400:
+                return self._parse_response(response, "subir archivo a MobSF")
+
+            last_response = response
+
+            if not self._is_retryable_upload_error(response):
+                break
+
+            logger.warning(
+                "MobSF: fallo subiendo %s con Content-Type=%s. "
+                "HTTP %s: %s. Probando alternativa...",
+                apk_path.name,
+                content_type_label,
+                response.status_code,
+                response.text[:300],
             )
 
-        return self._parse_response(response, "subir archivo a MobSF")
+        if last_response is None:
+            raise MobSFClientError(f"No se pudo realizar la subida de {apk_path}")
+
+        return self._parse_response(last_response, "subir archivo a MobSF")
 
     def scan_file(
         self,
@@ -214,6 +255,36 @@ class MobSFClient:
             return "application/zip"
 
         return "application/octet-stream"
+    
+    def _candidate_content_types_for(self, apk_path: Path) -> list[str | None]:
+        suffix = apk_path.suffix.lower()
+
+        if suffix == ".apk":
+            return [
+                "application/vnd.android.package-archive",
+                "application/octet-stream",
+                None,
+            ]
+
+        if suffix in {".xapk", ".apks", ".apkm"}:
+            return [
+                "application/octet-stream",
+                None,
+                "application/zip",
+                "application/x-zip-compressed",
+            ]
+
+        return [
+            "application/octet-stream",
+            None,
+        ]
+
+    def _is_retryable_upload_error(self, response: requests.Response) -> bool:
+        if response.status_code in {400, 415}:
+            return "File format not Supported" in response.text or "Unsupported" in response.text
+
+        return False
+
 
 
 def check_mobsf_health() -> dict[str, Any]:
