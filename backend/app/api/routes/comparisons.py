@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.application.services.app_analysis_service import AppAnalysisError
+from app.application.services.app_registration_service import AppRegistrationError
 from app.application.services.comparison_service import (
     ComparisonExecutionResult,
     ComparisonService,
@@ -40,7 +41,7 @@ def request_comparison(
 
         return _to_response(result)
 
-    except AppAnalysisError as exc:
+    except (AppRegistrationError, AppAnalysisError) as exc:
         db.rollback()
 
         logger.exception("Error controlado creando comparativa")

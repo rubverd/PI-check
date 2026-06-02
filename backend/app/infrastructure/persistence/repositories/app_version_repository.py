@@ -19,12 +19,66 @@ class AppVersionRepository:
 
         return self._to_domain(model)
 
+    def find_versions_by_app_id(self, id_app: str) -> list[AppVersion]:
+        stmt = (
+            select(AppVersionModel)
+            .where(AppVersionModel.id_app == id_app)
+            .order_by(
+                AppVersionModel.fecha_version.desc().nullslast(),
+                AppVersionModel.version_code.desc().nullslast(),
+                AppVersionModel.version.desc(),
+            )
+        )
+
+        models = self.db.execute(stmt).scalars().all()
+
+        return [self._to_domain(model) for model in models]
+
+    def find_latest_by_app_id(self, id_app: str) -> AppVersion | None:
+        stmt = (
+            select(AppVersionModel)
+            .where(AppVersionModel.id_app == id_app)
+            .order_by(
+                AppVersionModel.fecha_version.desc().nullslast(),
+                AppVersionModel.version_code.desc().nullslast(),
+                AppVersionModel.version.desc(),
+            )
+            .limit(1)
+        )
+
+        model = self.db.execute(stmt).scalars().first()
+
+        if model is None:
+            return None
+
+        return self._to_domain(model)
+
+    def find_by_apk_sha256(
+        self,
+        id_app: str,
+        apk_sha256: str,
+    ) -> AppVersion | None:
+        stmt = (
+            select(AppVersionModel)
+            .where(AppVersionModel.id_app == id_app)
+            .where(AppVersionModel.apk_sha256 == apk_sha256)
+            .limit(1)
+        )
+
+        model = self.db.execute(stmt).scalars().first()
+
+        if model is None:
+            return None
+
+        return self._to_domain(model)
+
     def find_latest_with_mobsf_report(self, id_app: str) -> AppVersion | None:
         stmt = (
             select(AppVersionModel)
             .where(AppVersionModel.id_app == id_app)
             .where(AppVersionModel.estado_mobsf == MobSFAnalysisStatus.SUCCESS.value)
             .where(AppVersionModel.ruta_informe_mobsf.is_not(None))
+            .where(AppVersionModel.hash_mobsf.is_not(None))
             .order_by(
                 AppVersionModel.fecha_version.desc().nullslast(),
                 AppVersionModel.version_code.desc().nullslast(),

@@ -3,6 +3,10 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 
+IntegrationModelApi = Literal["legacy", "health_connect", "unknown"]
+MobsfStatusApi = Literal["not_analyzed", "pending", "success", "error"]
+
+
 class AppSearchItem(BaseModel):
     app_id: str
     title: str
@@ -22,13 +26,38 @@ class AppSearchResponse(BaseModel):
     results: list[AppSearchItem]
 
 
+class RegisteredAppItem(BaseModel):
+    app_id: str
+    name: str
+    developer: Optional[str] = None
+    icon: Optional[str] = None
+    category: str = ""
+
+    version: str
+    version_code: Optional[int] = None
+    version_date: Optional[str] = None
+
+    integration_model: IntegrationModelApi
+    mobsf_status: MobsfStatusApi
+    mobsf_report_available: bool = False
+
+
+class RegisteredAppsResponse(BaseModel):
+    count: int
+    results: list[RegisteredAppItem]
+
+
 class AnalyzedAppItem(BaseModel):
     app_id: str
     name: str
+    developer: Optional[str] = None
+    icon: Optional[str] = None
     version: str
-    category: str
-    analysis_date: str
-    integration_model: Literal["legacy", "health_connect"]
+    category: str = ""
+    analysis_date: str = ""
+    integration_model: IntegrationModelApi
+    mobsf_status: MobsfStatusApi = "success"
+    mobsf_report_available: bool = True
 
 
 class AnalyzedAppsResponse(BaseModel):

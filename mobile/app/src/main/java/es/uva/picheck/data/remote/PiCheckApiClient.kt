@@ -46,7 +46,7 @@ object PiCheckApiClient {
     }
 
     suspend fun getAnalyzedApps(): List<AnalyzedApp> = withContext(Dispatchers.IO) {
-        val response = get("/api/apps/analyzed")
+        val response = get("/api/apps/registered")
         val results = JSONObject(response).getJSONArray("results")
 
         List(results.length()) { index ->
@@ -111,13 +111,18 @@ object PiCheckApiClient {
     private fun JSONObject.toAnalyzedApp(): AnalyzedApp = AnalyzedApp(
         appId = getString("app_id"),
         name = getString("name"),
+        developer = optNullableString("developer"),
+        icon = optNullableString("icon"),
         version = getString("version"),
-        category = getString("category"),
-        analysisDate = getString("analysis_date"),
-        integrationModel = when (getString("integration_model")) {
+        category = optString("category", ""),
+        analysisDate = optString("analysis_date", ""),
+        integrationModel = when (optString("integration_model")) {
             "health_connect", "HEALTH_CONNECT" -> IntegrationModel.HEALTH_CONNECT
-            else -> IntegrationModel.LEGACY
+            "legacy", "LEGACY" -> IntegrationModel.LEGACY
+            else -> IntegrationModel.UNKNOWN
         },
+        mobsfStatus = optNullableString("mobsf_status"),
+        mobsfReportAvailable = optBoolean("mobsf_report_available", false),
     )
 
     private fun JSONObject.toComparisonAnalysisResult(): ComparisonAnalysisResult =

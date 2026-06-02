@@ -619,7 +619,11 @@ private fun AnalyzedAppCard(
                 )
 
                 Text(
-                    text = "Analizada: ${app.analysisDate}",
+                    text = if (app.mobsfReportAvailable) {
+                        "MobSF: informe disponible"
+                    } else {
+                        "MobSF: ${app.mobsfStatus ?: "no analizada"}"
+                    }
                     style = MaterialTheme.typography.bodySmall,
                     color = PiCheckDarkText,
                     maxLines = 1,
@@ -904,6 +908,17 @@ private fun AnalyzedAppIcon(
             color = Color.White,
             fontWeight = FontWeight.Bold,
         )
+
+        if (!app.icon.isNullOrBlank()) {
+            AsyncImage(
+                model = app.icon,
+                contentDescription = "Icono de ${app.name}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(size.dp)
+                    .clip(CircleShape),
+            )
+        }
     }
 }
 
@@ -911,8 +926,8 @@ private fun AnalyzedApp.toPlayStoreApp(): PlayStoreApp {
     return PlayStoreApp(
         appId = appId,
         title = name,
-        developer = null,
-        icon = null,
+        developer = developer,
+        icon = icon,
         score = null,
         genre = category,
         url = null,

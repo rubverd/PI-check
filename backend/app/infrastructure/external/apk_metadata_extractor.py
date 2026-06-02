@@ -4,6 +4,7 @@ from pathlib import Path
 import hashlib
 import logging
 import re
+import shutil
 import subprocess
 import zipfile
 
@@ -21,7 +22,7 @@ class ExtractedApkMetadata:
     fecha_version: date | None
     categoria: str | None
     modelo_integracion: IntegrationModel
-    apk_sha256: str
+    apk_sha256: str | None
 
 
 def extract_apk_metadata(
@@ -33,23 +34,51 @@ def extract_apk_metadata(
 ) -> ExtractedApkMetadata:
     apk_sha256 = calculate_sha256(apk_path)
 
-    aapt_metadata = _extract_with_aapt(apk_path)
+    logger.info("[METADATA] Calculado SHA256 para %s: %s", apk_path, apk_sha256)
+
+    metadata_apk_path = _prepare_apk_for_metadata_extraction(apk_path)
+
+    if metadata_apk_path is not None:
+        logger.info(
+            "[METADATA] Archivo usado para extracción de metadatos: %s",
+            metadata_apk_path,
+        )
+        aapt_metadata = _extract_with_aapt(metadata_apk_path)
+    else:
+        logger.warning(
+            "[METADATA] No se encontró APK interno para extraer metadatos en %s",
+            apk_path,
+        )
+        aapt_metadata = {}
 
     id_app = aapt_metadata.get("package_name") or fallback_app_id
 
     raw_version = (
         aapt_metadata.get("version_name")
-        or fallback_version
+        or (
+            fallback_version
+            if is_valid_version_string(fallback_version)
+            else None
+        )
         or f"unknown-{apk_sha256[:12]}"
     )
 
-    version = _normalize_version(raw_version, apk_sha256)
+    version = normalize_version(raw_version, apk_sha256)
 
     version_code = _to_int_or_none(aapt_metadata.get("version_code"))
 
-    fecha_version = _parse_date_or_none(fallback_version_date)
+    fecha_version = parse_date_or_none(fallback_version_date)
 
     modelo_integracion = detect_integration_model(apk_path)
+
+    logger.info(
+        "[METADATA] Resultado extracción: id_app=%s version=%s "
+        "version_code=%s integration=%s",
+        id_app,
+        version,
+        version_code,
+        modelo_integracion.value,
+    )
 
     return ExtractedApkMetadata(
         id_app=id_app,
@@ -73,13 +102,6 @@ def calculate_sha256(file_path: Path) -> str:
 
 
 def detect_integration_model(file_path: Path) -> IntegrationModel:
-    """
-    Detección inicial y conservadora.
-
-    Busca cadenas relacionadas con Health Connect dentro del APK/XAPK/APKS/APKM.
-    Más adelante puede sustituirse por análisis formal del AndroidManifest.xml
-    usando apktool, JADX o aapt2.
-    """
     markers = [
         "android.permission.health",
         "androidx.health.connect",
@@ -88,16 +110,26 @@ def detect_integration_model(file_path: Path) -> IntegrationModel:
     ]
 
     try:
-        found = _contains_any_marker(file_path, markers)
+        found_markers = find_markers(file_path, markers)
 
-        if found:
+        if found_markers:
+            logger.info(
+                "[INTEGRATION] Marcadores Health Connect encontrados en %s: %s",
+                file_path,
+                found_markers,
+            )
             return IntegrationModel.HEALTH_CONNECT
+
+        logger.info(
+            "[INTEGRATION] No se encontraron marcadores Health Connect en %s",
+            file_path,
+        )
 
         return IntegrationModel.LEGACY
 
     except Exception as exc:
         logger.warning(
-            "No se pudo detectar modelo de integración para %s: %s",
+            "[INTEGRATION] No se pudo detectar modelo de integración para %s: %s",
             file_path,
             exc,
         )
@@ -105,49 +137,176 @@ def detect_integration_model(file_path: Path) -> IntegrationModel:
         return IntegrationModel.UNKNOWN
 
 
-def _extract_with_aapt(apk_path: Path) -> dict[str, str]:
-    """
-    Usa `aapt dump badging` si está disponible en la imagen Docker.
+def find_markers(file_path: Path, markers: list[str]) -> list[str]:
+    marker_bytes: list[tuple[str, bytes]] = []
 
-    Si aapt no está instalado o el archivo no es un APK estándar,
-    devuelve un diccionario vacío.
-    """
+    for marker in markers:
+        marker_bytes.append((marker, marker.encode("utf-8")))
+        marker_bytes.append((marker, marker.encode("utf-16le")))
+
+    suffix = file_path.suffix.lower()
+
+    if suffix in {".xapk", ".apks", ".apkm", ".zip"}:
+        return _zip_find_markers(file_path, marker_bytes)
+
+    return _file_find_markers(file_path, marker_bytes)
+
+
+def is_valid_version_string(value: str | None) -> bool:
+    if value is None:
+        return False
+
+    clean_value = value.strip()
+
+    invalid_values = {
+        "",
+        "varies with device",
+        "varía según el dispositivo",
+        "varies",
+        "unknown",
+        "none",
+        "null",
+    }
+
+    return clean_value.lower() not in invalid_values
+
+
+def normalize_version(version: str, apk_sha256: str) -> str:
+    clean_version = version.strip()
+
+    if not is_valid_version_string(clean_version):
+        return f"unknown-{apk_sha256[:12]}"
+
+    return clean_version[:100]
+
+
+def parse_date_or_none(value: str | None) -> date | None:
+    if not value:
+        return None
+
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        return None
+
+
+def _prepare_apk_for_metadata_extraction(file_path: Path) -> Path | None:
+    suffix = file_path.suffix.lower()
+
+    if suffix == ".apk":
+        return file_path
+
+    if suffix not in {".xapk", ".apks", ".apkm", ".zip"}:
+        return None
+
+    if not zipfile.is_zipfile(file_path):
+        logger.warning("[METADATA] El archivo no es ZIP válido: %s", file_path)
+        return None
+
+    extraction_dir = file_path.parent / "_metadata_extracted" / file_path.stem
+    extraction_dir.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(file_path, "r") as archive:
+        apk_members = [
+            member
+            for member in archive.infolist()
+            if not member.is_dir()
+            and member.filename.lower().endswith(".apk")
+        ]
+
+        if not apk_members:
+            return None
+
+        selected_member = sorted(apk_members, key=_apk_member_priority)[0]
+        output_apk = extraction_dir / Path(selected_member.filename).name
+
+        logger.info(
+            "[METADATA] Extrayendo APK interno para metadatos: %s -> %s",
+            selected_member.filename,
+            output_apk,
+        )
+
+        with archive.open(selected_member, "r") as source, output_apk.open("wb") as target:
+            shutil.copyfileobj(source, target)
+
+        return output_apk
+
+
+def _apk_member_priority(member: zipfile.ZipInfo) -> tuple[int, int]:
+    filename = Path(member.filename).name.lower()
+
+    if filename == "base.apk":
+        return (0, -member.file_size)
+
+    if "base" in filename:
+        return (1, -member.file_size)
+
+    if "universal" in filename:
+        return (2, -member.file_size)
+
+    if filename.startswith("split_config"):
+        return (10, -member.file_size)
+
+    return (5, -member.file_size)
+
+
+def _extract_with_aapt(apk_path: Path) -> dict[str, str]:
     if apk_path.suffix.lower() != ".apk":
         return {}
 
-    command = [
-        "aapt",
-        "dump",
-        "badging",
-        str(apk_path),
+    commands = [
+        ["aapt", "dump", "badging", str(apk_path)],
+        ["aapt2", "dump", "badging", str(apk_path)],
     ]
 
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
 
-        if result.returncode != 0:
-            logger.info("aapt no pudo analizar %s: %s", apk_path, result.stderr)
-            return {}
+            if result.returncode != 0:
+                logger.info(
+                    "[METADATA] %s no pudo analizar %s: %s",
+                    command[0],
+                    apk_path,
+                    result.stderr,
+                )
+                continue
 
-        return _parse_aapt_badging(result.stdout)
+            return _parse_aapt_badging(result.stdout)
 
-    except FileNotFoundError:
-        logger.info("aapt no está instalado. Se usarán metadatos fallback.")
-        return {}
+        except FileNotFoundError:
+            logger.info("[METADATA] %s no está instalado.", command[0])
+            continue
 
-    except subprocess.TimeoutExpired:
-        logger.warning("aapt superó el tiempo máximo analizando %s", apk_path)
-        return {}
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "[METADATA] %s superó el tiempo máximo analizando %s",
+                command[0],
+                apk_path,
+            )
+            continue
 
-    except Exception as exc:
-        logger.warning("Error usando aapt sobre %s: %s", apk_path, exc)
-        return {}
+        except Exception as exc:
+            logger.warning(
+                "[METADATA] Error usando %s sobre %s: %s",
+                command[0],
+                apk_path,
+                exc,
+            )
+            continue
+
+    logger.warning(
+        "[METADATA] No se pudieron extraer metadatos con aapt/aapt2 para %s",
+        apk_path,
+    )
+
+    return {}
 
 
 def _parse_aapt_badging(output: str) -> dict[str, str]:
@@ -186,35 +345,6 @@ def _extract_quoted_value(text: str, key: str) -> str | None:
     return None
 
 
-def _normalize_version(version: str, apk_sha256: str) -> str:
-    clean_version = version.strip()
-
-    invalid_values = {
-        "",
-        "varies with device",
-        "varía según el dispositivo",
-        "varies",
-        "unknown",
-        "none",
-        "null",
-    }
-
-    if clean_version.lower() in invalid_values:
-        return f"unknown-{apk_sha256[:12]}"
-
-    return clean_version[:100]
-
-
-def _parse_date_or_none(value: str | None) -> date | None:
-    if not value:
-        return None
-
-    try:
-        return date.fromisoformat(value[:10])
-    except ValueError:
-        return None
-
-
 def _to_int_or_none(value: str | None) -> int | None:
     if value is None:
         return None
@@ -225,37 +355,33 @@ def _to_int_or_none(value: str | None) -> int | None:
         return None
 
 
-def _contains_any_marker(file_path: Path, markers: list[str]) -> bool:
-    marker_bytes = []
+def _file_find_markers(
+    file_path: Path,
+    marker_bytes: list[tuple[str, bytes]],
+) -> list[str]:
+    found: set[str] = set()
 
-    for marker in markers:
-        marker_bytes.append(marker.encode("utf-8"))
-        marker_bytes.append(marker.encode("utf-16le"))
-
-    suffix = file_path.suffix.lower()
-
-    if suffix in {".xapk", ".apks", ".apkm", ".zip"}:
-        return _zip_contains_any_marker(file_path, marker_bytes)
-
-    return _file_contains_any_marker(file_path, marker_bytes)
-
-
-def _file_contains_any_marker(file_path: Path, marker_bytes: list[bytes]) -> bool:
     with file_path.open("rb") as file:
         previous = b""
 
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             data = previous + chunk
 
-            if any(marker in data for marker in marker_bytes):
-                return True
+            for marker, marker_value in marker_bytes:
+                if marker_value in data:
+                    found.add(marker)
 
             previous = data[-256:]
 
-    return False
+    return sorted(found)
 
 
-def _zip_contains_any_marker(file_path: Path, marker_bytes: list[bytes]) -> bool:
+def _zip_find_markers(
+    file_path: Path,
+    marker_bytes: list[tuple[str, bytes]],
+) -> list[str]:
+    found: set[str] = set()
+
     with zipfile.ZipFile(file_path, "r") as archive:
         for member in archive.infolist():
             if member.is_dir():
@@ -263,7 +389,7 @@ def _zip_contains_any_marker(file_path: Path, marker_bytes: list[bytes]) -> bool
 
             lower_name = member.filename.lower()
 
-            if not lower_name.endswith((".apk", ".xml", ".json", ".txt")):
+            if not lower_name.endswith((".apk", ".dex", ".xml", ".json", ".txt")):
                 continue
 
             with archive.open(member, "r") as file:
@@ -277,9 +403,10 @@ def _zip_contains_any_marker(file_path: Path, marker_bytes: list[bytes]) -> bool
 
                     data = previous + chunk
 
-                    if any(marker in data for marker in marker_bytes):
-                        return True
+                    for marker, marker_value in marker_bytes:
+                        if marker_value in data:
+                            found.add(marker)
 
                     previous = data[-256:]
 
-    return False
+    return sorted(found)
