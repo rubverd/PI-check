@@ -623,7 +623,7 @@ private fun AnalyzedAppCard(
                         "MobSF: informe disponible"
                     } else {
                         "MobSF: ${app.mobsfStatus ?: "no analizada"}"
-                    }
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = PiCheckDarkText,
                     maxLines = 1,
