@@ -60,6 +60,7 @@ import es.uva.picheck.ui.theme.PiCheckBurgundy
 import es.uva.picheck.ui.theme.PiCheckCardBorder
 import es.uva.picheck.ui.theme.PiCheckDarkText
 import es.uva.picheck.data.model.ComparisonAnalysisResult
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val ElectricBlue = Color(0xFF2D5BFF)
@@ -114,23 +115,50 @@ fun AppSearchScreen() {
         }
     }
 
-    LaunchedEffect(Unit) {
-        isLoadingAnalyzed = true
-        analyzedStatus = "Consultando aplicaciones registradas..."
+    suspend fun refreshRegisteredApps(
+    showLoadingIndicator: Boolean = true,
+    ) {
+        if (!showLoadingIndicator && isLoadingAnalyzed) {
+            return
+        }
 
-        analyzedApps = try {
-            PiCheckApiClient.getAnalyzedApps().also {
-                analyzedStatus = if (it.isEmpty()) {
-                    "No hay aplicaciones registradas todavía."
-                } else {
-                    "Aplicaciones registradas disponibles: ${it.size}"
-                }
+        if (showLoadingIndicator) {
+            isLoadingAnalyzed = true
+            analyzedStatus = "Consultando aplicaciones registradas..."
+        }
+
+        try {
+            val latestRegisteredApps = PiCheckApiClient.getRegisteredApps()
+
+            analyzedApps = latestRegisteredApps
+
+            analyzedStatus = if (latestRegisteredApps.isEmpty()) {
+                "No hay aplicaciones registradas todavía."
+            } else {
+                "Aplicaciones registradas disponibles: ${latestRegisteredApps.size}"
             }
         } catch (exception: Exception) {
-            analyzedStatus = "No se pudieron cargar las aplicaciones registradas: ${exception.message}"
-            emptyList()
+            if (showLoadingIndicator || analyzedApps.isEmpty()) {
+                analyzedStatus =
+                    "No se pudieron cargar las aplicaciones registradas: ${exception.message}"
+            }
         } finally {
-            isLoadingAnalyzed = false
+            if (showLoadingIndicator) {
+                isLoadingAnalyzed = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        refreshRegisteredApps(showLoadingIndicator = true)
+    }
+
+    LaunchedEffect(currentMode) {
+        if (currentMode == AppListMode.REGISTERED) {
+            while (true) {
+                delay(5_000)
+                refreshRegisteredApps(showLoadingIndicator = false)
+            }
         }
     }
     

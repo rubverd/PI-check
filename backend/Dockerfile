@@ -11,7 +11,11 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libssl3 \
+        aapt \
+        unzip \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=apkeep-builder /usr/local/cargo/bin/apkeep /usr/local/bin/apkeep
