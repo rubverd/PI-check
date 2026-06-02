@@ -45,7 +45,7 @@ object PiCheckApiClient {
         response.toComparisonAnalysisResult()
     }
 
-    suspend fun getAnalyzedApps(): List<AnalyzedApp> = withContext(Dispatchers.IO) {
+    suspend fun getRegisteredApps(): List<AnalyzedApp> = withContext(Dispatchers.IO) {
         val response = get("/api/apps/registered")
         val results = JSONObject(response).getJSONArray("results")
 
@@ -53,6 +53,8 @@ object PiCheckApiClient {
             results.getJSONObject(index).toAnalyzedApp()
         }
     }
+
+    suspend fun getAnalyzedApps(): List<AnalyzedApp> = getRegisteredApps()
 
     private fun get(path: String): String {
         val connection = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {
@@ -68,7 +70,7 @@ object PiCheckApiClient {
         val connection = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10_000
-            readTimeout = 600_000
+            readTimeout = 800_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json; charset=UTF-8")
             setRequestProperty("Accept", "application/json")
