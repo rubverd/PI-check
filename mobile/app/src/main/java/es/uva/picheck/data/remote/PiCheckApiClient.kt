@@ -18,7 +18,7 @@ import java.net.URLEncoder
 import java.net.URL
 
 object PiCheckApiClient {
-    private const val BASE_URL = "https://192.168.1.48:8443"
+    private const val BASE_URL = "https://127.0.0.1:8443"
 
     suspend fun searchApps(query: String): List<PlayStoreApp> = withContext(Dispatchers.IO) {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
