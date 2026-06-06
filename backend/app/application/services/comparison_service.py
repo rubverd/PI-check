@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.application.services.app_analysis_service import AppAnalysisService
 from app.application.services.app_registration_service import AppRegistrationService
+from app.application.services.mastg_catalog import GLOBAL_INDEX_ID
+from app.application.services.mastg_execution_service import MastgExecutionService
 from app.domain.entities.comparison_result import ComparisonResult
 from app.schemas.comparisons import ComparisonRequest
 
@@ -23,6 +25,7 @@ class ComparisonService:
         self.db = db
         self.app_registration_service = AppRegistrationService(db)
         self.app_analysis_service = AppAnalysisService(db)
+        self.mastg_execution_service = MastgExecutionService(db)
 
     def create_comparison(
         self,
@@ -55,16 +58,32 @@ class ComparisonService:
 
         messages.extend(messages_a)
 
+        mastg_a = self.mastg_execution_service.execute_for_prepared_app(
+            prepared_app=prepared_a,
+            id_indice=GLOBAL_INDEX_ID,
+        )
+        report_a.resultados_mastg = mastg_a.evaluations
+        report_a.resultados_indices = mastg_a.index_results
+        messages.extend(mastg_a.messages)
+
         report_b, messages_b = self.app_analysis_service.ensure_mobsf_report(
             prepared_app=prepared_b,
         )
 
         messages.extend(messages_b)
 
+        mastg_b = self.mastg_execution_service.execute_for_prepared_app(
+            prepared_app=prepared_b,
+            id_indice=GLOBAL_INDEX_ID,
+        )
+        report_b.resultados_mastg = mastg_b.evaluations
+        report_b.resultados_indices = mastg_b.index_results
+        messages.extend(mastg_b.messages)
+
         comparison = ComparisonResult(
             app_a=report_a,
             app_b=report_b,
-            id_indice_aplicado=None,
+            id_indice_aplicado=GLOBAL_INDEX_ID,
         )
 
         messages.append("[COMPARISON] Comparativa creada en memoria correctamente.")

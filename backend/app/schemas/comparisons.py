@@ -1,6 +1,6 @@
 from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SelectedAppMetadata(BaseModel):
@@ -35,8 +35,8 @@ class ComparisonRequestResponse(BaseModel):
     message: str
     app_a: SelectedAppMetadata
     app_b: SelectedAppMetadata
-    messages: list[str] = []
-    apk_downloads: list[ApkDownloadInfo] = []
+    messages: list[str] = Field(default_factory=list)
+    apk_downloads: list[ApkDownloadInfo] = Field(default_factory=list)
 
 
 class VersionAppInfo(BaseModel):
@@ -52,6 +52,25 @@ class VersionAppInfo(BaseModel):
     ruta_informe_mobsf: Optional[str] = None
 
 
+class MastgEvaluationInfo(BaseModel):
+    id_mastg: str
+    resultado: str
+    ruta_resultado_json: Optional[str] = None
+    mensaje_error: Optional[str] = None
+    fecha_ejecucion: Optional[str] = None
+
+
+class PrivacyIndexResultInfo(BaseModel):
+    id_indice: str
+    nombre_indice: str
+    pruebas_superadas: int
+    pruebas_totales: int
+    pruebas_fallidas: int = 0
+    pruebas_error: int = 0
+    pruebas_no_aplicables: int = 0
+    puntuacion: float
+
+
 class MobSFReportInfo(BaseModel):
     available: bool
     hash_mobsf: Optional[str] = None
@@ -64,6 +83,8 @@ class MobSFReportInfo(BaseModel):
 class VersionReportInfo(BaseModel):
     version_app: VersionAppInfo
     mobsf_report: MobSFReportInfo
+    resultados_mastg: list[MastgEvaluationInfo] = Field(default_factory=list)
+    resultados_indices: list[PrivacyIndexResultInfo] = Field(default_factory=list)
 
 
 class ComparisonAnalysisResponse(BaseModel):

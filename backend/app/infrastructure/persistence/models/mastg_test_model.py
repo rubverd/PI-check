@@ -32,6 +32,21 @@ class MastgTestModel(Base):
         nullable=True,
     )
 
+    referencia_mastg: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    descripcion: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    owasp_category: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
     resultados = relationship(
         "MastgEvaluationModel",
         back_populates="prueba_mastg",

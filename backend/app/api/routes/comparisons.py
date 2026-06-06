@@ -14,7 +14,9 @@ from app.infrastructure.database.session import get_db_session
 from app.schemas.comparisons import (
     ComparisonAnalysisResponse,
     ComparisonRequest,
+    MastgEvaluationInfo,
     MobSFReportInfo,
+    PrivacyIndexResultInfo,
     VersionAppInfo,
     VersionReportInfo,
 )
@@ -107,4 +109,31 @@ def _version_report_to_response(
             scan_type=mobsf_report.scan_type if mobsf_report else None,
             json_report=mobsf_report.json_report if mobsf_report else None,
         ),
+        resultados_mastg=[
+            MastgEvaluationInfo(
+                id_mastg=evaluation.id_mastg,
+                resultado=evaluation.resultado.value,
+                ruta_resultado_json=evaluation.ruta_resultado_json,
+                mensaje_error=evaluation.mensaje_error,
+                fecha_ejecucion=(
+                    evaluation.fecha_ejecucion.isoformat()
+                    if evaluation.fecha_ejecucion
+                    else None
+                ),
+            )
+            for evaluation in version_report.resultados_mastg
+        ],
+        resultados_indices=[
+            PrivacyIndexResultInfo(
+                id_indice=index_result.id_indice,
+                nombre_indice=index_result.nombre_indice,
+                pruebas_superadas=index_result.pruebas_superadas,
+                pruebas_totales=index_result.pruebas_totales,
+                pruebas_fallidas=index_result.pruebas_fallidas,
+                pruebas_error=index_result.pruebas_error,
+                pruebas_no_aplicables=index_result.pruebas_no_aplicables,
+                puntuacion=index_result.puntuacion,
+            )
+            for index_result in version_report.resultados_indices
+        ],
     )
