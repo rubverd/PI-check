@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -53,6 +55,7 @@ import coil.compose.AsyncImage
 import es.uva.picheck.data.model.AnalyzedApp
 import es.uva.picheck.data.model.IntegrationModel
 import es.uva.picheck.data.model.PlayStoreApp
+import es.uva.picheck.data.model.RegisteredAppVersion
 import es.uva.picheck.data.remote.PiCheckApiClient
 import es.uva.picheck.ui.theme.PiCheckBackground
 import es.uva.picheck.ui.theme.PiCheckBlue
@@ -98,9 +101,9 @@ fun AppSearchScreen() {
 
     fun toggleSelectedApp(app: PlayStoreApp) {
         selectedApps = when {
-            selectedApps.any { it.appId == app.appId } -> {
+            selectedApps.any { it.selectionKey() == app.selectionKey() } -> {
                 statusMessage = "Aplicación eliminada de la selección."
-                selectedApps.filterNot { it.appId == app.appId }
+                selectedApps.filterNot { it.selectionKey() == app.selectionKey() }
             }
 
             selectedApps.size < 2 -> {
@@ -224,7 +227,7 @@ fun AppSearchScreen() {
             SelectedAppsPanel(
                 selectedApps = selectedApps,
                 onRemove = { appToRemove ->
-                    selectedApps = selectedApps.filterNot { it.appId == appToRemove.appId }
+                    selectedApps = selectedApps.filterNot { it.selectionKey() == appToRemove.selectionKey() }
                     statusMessage = "Aplicación eliminada de la selección."
                 },
             )
@@ -298,14 +301,11 @@ fun AppSearchScreen() {
 
                         if (!isLoadingAnalyzed && analyzedApps.isNotEmpty()) {
                             items(analyzedApps, key = { it.appId }) { analyzedApp ->
-                                val playStoreApp = analyzedApp.toPlayStoreApp()
-                                val isSelected = selectedApps.any { it.appId == analyzedApp.appId }
-
                                 AnalyzedAppCard(
                                     app = analyzedApp,
-                                    isSelected = isSelected,
-                                    onClick = {
-                                        toggleSelectedApp(playStoreApp)
+                                    selectedKeys = selectedApps.map { it.selectionKey() }.toSet(),
+                                    onVersionSelected = { version ->
+                                        toggleSelectedApp(analyzedApp.toPlayStoreApp(version))
                                     },
                                 )
                             }
@@ -360,7 +360,7 @@ fun AppSearchScreen() {
 
                         if (!isLoadingSearch && apps.isNotEmpty()) {
                             items(apps, key = { it.appId }) { app ->
-                                val isSelected = selectedApps.any { it.appId == app.appId }
+                                val isSelected = selectedApps.any { it.selectionKey() == app.selectionKey() }
 
                                 AppResultCard(
                                     app = app,
@@ -598,85 +598,147 @@ private fun EmptySearchCard(
 @Composable
 private fun AnalyzedAppCard(
     app: AnalyzedApp,
-    isSelected: Boolean,
-    onClick: () -> Unit,
+    selectedKeys: Set<String>,
+    onVersionSelected: (RegisteredAppVersion) -> Unit,
 ) {
-    val borderColor = if (isSelected) PiCheckBurgundy else PiCheckCardBorder
+    var expanded by remember { mutableStateOf(false) }
+    val versions = app.versions.ifEmpty {
+        listOf(
+            RegisteredAppVersion(
+                version = app.version,
+                integrationModel = app.integrationModel,
+                integrationModelShort = app.integrationModel.shortLabel(),
+                mobsfStatus = app.mobsfStatus,
+                mobsfReportAvailable = app.mobsfReportAvailable,
+            )
+        )
+    }
+    val hasSelectedVersion = versions.any { version ->
+        selectedKeys.contains(app.toPlayStoreApp(version).selectionKey())
+    }
+    val borderColor = if (hasSelectedVersion) PiCheckBurgundy else PiCheckCardBorder
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(2.dp, borderColor),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = if (isSelected) 5.dp else 1.dp,
+            defaultElevation = if (hasSelectedVersion) 5.dp else 1.dp,
         ),
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            AnalyzedAppIcon(app = app)
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = app.name,
-                    fontWeight = FontWeight.Bold,
-                    color = PiCheckDarkText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                Text(
-                    text = "Versión: ${app.version}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = PiCheckDarkText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                Text(
-                    text = "Categoría: ${app.category}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = PiCheckDarkText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                Text(
-                    text = if (app.mobsfReportAvailable) {
-                        "MobSF: informe disponible"
-                    } else {
-                        "MobSF: ${app.mobsfStatus ?: "no analizada"}"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = PiCheckDarkText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text = if (app.integrationModel == IntegrationModel.HEALTH_CONNECT) "HC" else "L",
-                    color = ElectricBlue,
-                    fontWeight = FontWeight.ExtraBold,
-                    style = MaterialTheme.typography.titleMedium,
-                )
+                AnalyzedAppIcon(app = app)
 
-                if (isSelected) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "✓",
-                        color = PiCheckBurgundy,
+                        text = app.name,
                         fontWeight = FontWeight.Bold,
+                        color = PiCheckDarkText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Text(
+                        text = "Versiones registradas: ${versions.size}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PiCheckDarkText,
+                    )
+
+                    Text(
+                        text = "Categoría: ${app.category}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PiCheckDarkText,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                        contentDescription = if (expanded) "Ocultar versiones" else "Mostrar versiones",
+                        tint = PiCheckBurgundy,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clickable { expanded = !expanded },
+                    )
+
+                    if (hasSelectedVersion) {
+                        Text(
+                            text = "✓",
+                            color = PiCheckBurgundy,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
             }
+
+            if (expanded) {
+                Spacer(modifier = Modifier.height(10.dp))
+                versions.forEach { version ->
+                    val versionApp = app.toPlayStoreApp(version)
+                    RegisteredVersionRow(
+                        version = version,
+                        isSelected = selectedKeys.contains(versionApp.selectionKey()),
+                        onClick = { onVersionSelected(version) },
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RegisteredVersionRow(
+    version: RegisteredAppVersion,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isSelected) PiCheckBackground else Color(0xFFF8F8FB))
+            .clickable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Versión ${version.version}",
+                color = PiCheckDarkText,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = version.mobsfLabel(),
+                color = PiCheckDarkText,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
+        Text(
+            text = version.integrationModelShort.ifBlank { version.integrationModel.shortLabel() },
+            color = ElectricBlue,
+            fontWeight = FontWeight.ExtraBold,
+            style = MaterialTheme.typography.titleMedium,
+        )
+
+        if (isSelected) {
+            Text(
+                text = "✓",
+                color = PiCheckBurgundy,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }
@@ -950,16 +1012,36 @@ private fun AnalyzedAppIcon(
     }
 }
 
-private fun AnalyzedApp.toPlayStoreApp(): PlayStoreApp {
-    return PlayStoreApp(
-        appId = appId,
-        title = name,
-        developer = developer,
-        icon = icon,
-        score = null,
-        genre = category,
-        url = null,
-        version = version,
-        versionDate = null,
-    )
+private fun AnalyzedApp.toPlayStoreApp(version: RegisteredAppVersion): PlayStoreApp = PlayStoreApp(
+    appId = appId,
+    title = name,
+    developer = developer,
+    icon = icon,
+    genre = category,
+    version = version.version,
+    versionDate = version.versionDate,
+    selectedVersion = version.version,
+    versionCode = version.versionCode,
+    integrationModel = version.integrationModel,
+    apkSha256 = version.apkSha256,
+)
+
+private fun PlayStoreApp.selectionKey(): String = listOf(
+    appId,
+    selectedVersion ?: version.orEmpty(),
+    apkSha256.orEmpty(),
+).joinToString("|")
+
+private fun IntegrationModel.shortLabel(): String = when (this) {
+    IntegrationModel.HEALTH_CONNECT -> "HC"
+    IntegrationModel.LEGACY -> "L"
+    IntegrationModel.UNKNOWN -> "?"
+}
+
+private fun RegisteredAppVersion.mobsfLabel(): String = when (mobsfStatus) {
+    "success" -> if (mobsfReportAvailable) "MobSF OK" else "Pendiente"
+    "pending" -> "Pendiente"
+    "error" -> "Error"
+    "not_analyzed", null -> "No analizada"
+    else -> mobsfStatus
 }

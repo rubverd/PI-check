@@ -16,6 +16,7 @@ class AppVersion:
 
     version_code: int | None = None
     apk_sha256: str | None = None
+    ruta_apk: str | None = None
 
     ruta_informe_mobsf: str | None = None
     hash_mobsf: str | None = None
