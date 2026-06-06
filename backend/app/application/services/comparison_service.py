@@ -4,7 +4,10 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.application.services.app_analysis_service import AppAnalysisService
-from app.application.services.app_registration_service import AppRegistrationService
+from app.application.services.app_registration_service import (
+    AppRegistrationService,
+    _selected_app_key,
+)
 from app.domain.entities.comparison_result import ComparisonResult
 from app.schemas.comparisons import ComparisonRequest
 
@@ -46,8 +49,8 @@ class ComparisonService:
 
         messages.extend(registration_messages)
 
-        prepared_a = prepared_by_app_id[request.app_a.app_id]
-        prepared_b = prepared_by_app_id[request.app_b.app_id]
+        prepared_a = prepared_by_app_id[_selected_app_key(request.app_a)]
+        prepared_b = prepared_by_app_id[_selected_app_key(request.app_b)]
 
         report_a, messages_a = self.app_analysis_service.ensure_mobsf_report(
             prepared_app=prepared_a,
