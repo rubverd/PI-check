@@ -37,9 +37,20 @@ android {
     buildFeatures {
         compose = true
     }
-    // Do not exclude Kotlin model files from Gradle sourceSets here.
-    // If stale local comparison model files remain after a pull, run:
-    //   ./scripts/clean_android_stale_models.sh
+    sourceSets {
+        getByName("main") {
+            java.exclude(
+                "**/ComparisonModels.kt",
+                "**/ComparisonAnalysisResult.kt",
+                "**/VersionReportInfo.kt",
+                "**/VersionAppInfo.kt",
+                "**/MobSFReportInfo.kt",
+                "**/ComparisionModels.kt",
+                "**/ComparisionAnalysisResult.kt",
+            )
+        }
+    }
+
 }
 
 dependencies {
