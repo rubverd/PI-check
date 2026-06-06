@@ -1,11 +1,13 @@
 package es.uva.picheck.data.remote
 
 import es.uva.picheck.data.model.AnalyzedApp
-import es.uva.picheck.data.model.ComparisonAnalysisResult
+import es.uva.picheck.data.model.PiCheckComparisonAnalysis
 import es.uva.picheck.data.model.IntegrationModel
-import es.uva.picheck.data.model.MobSFReportInfo
+import es.uva.picheck.data.model.PiCheckMobSFReport
 import es.uva.picheck.data.model.PlayStoreApp
 import es.uva.picheck.data.model.RegisteredAppVersion
+import es.uva.picheck.data.model.PiCheckVersionAppInfo
+import es.uva.picheck.data.model.PiCheckVersionReport
 import es.uva.picheck.data.model.VersionAppInfo
 import es.uva.picheck.data.model.VersionReportInfo
 import kotlinx.coroutines.Dispatchers
@@ -45,14 +47,14 @@ object PiCheckApiClient {
         appA: PlayStoreApp,
         appB: PlayStoreApp,
         downloadApks: Boolean,
-    ): ComparisonAnalysisResult = withContext(Dispatchers.IO) {
+    ): PiCheckComparisonAnalysis = withContext(Dispatchers.IO) {
         val body = JSONObject()
             .put("app_a", appA.toComparisonJson())
             .put("app_b", appB.toComparisonJson())
             .put("download_apks", downloadApks)
 
         val response = post("/api/comparisons/request", body)
-        response.toComparisonAnalysisResult()
+        response.toPiCheckComparisonAnalysis()
     }
 
     suspend fun getRegisteredApps(): List<AnalyzedApp> = withContext(Dispatchers.IO) {
@@ -162,26 +164,41 @@ object PiCheckApiClient {
         )
     }
 
-    private fun JSONObject.toComparisonAnalysisResult(): ComparisonAnalysisResult =
-        ComparisonAnalysisResult(
+    private fun JSONObject.toRegisteredAppVersion(): RegisteredAppVersion {
+        val integrationModel = parseIntegrationModel(optString("integration_model"))
+        return RegisteredAppVersion(
+            version = getString("version"),
+            versionCode = optNullableInt("version_code"),
+            versionDate = optNullableString("version_date"),
+            integrationModel = integrationModel,
+            integrationModelShort = optString("integration_model_short", integrationModel.shortLabel()),
+            mobsfStatus = optNullableString("mobsf_status"),
+            mobsfReportAvailable = optBoolean("mobsf_report_available", false),
+            apkSha256 = optNullableString("apk_sha256"),
+            rutaApk = optNullableString("ruta_apk"),
+        )
+    }
+
+    private fun JSONObject.toPiCheckComparisonAnalysis(): PiCheckComparisonAnalysis =
+        PiCheckComparisonAnalysis(
             comparisonId = getString("comparison_id"),
             status = getString("status"),
             message = getString("message"),
             messages = getJSONArray("messages").toStringList(),
-            appA = getJSONObject("app_a").toVersionReportInfo(),
-            appB = getJSONObject("app_b").toVersionReportInfo(),
+            appA = getJSONObject("app_a").toPiCheckVersionReport(),
+            appB = getJSONObject("app_b").toPiCheckVersionReport(),
             idIndiceAplicado = optNullableString("id_indice_aplicado"),
             rawJson = toString(2),
         )
 
-    private fun JSONObject.toVersionReportInfo(): VersionReportInfo =
-        VersionReportInfo(
-            versionApp = getJSONObject("version_app").toVersionAppInfo(),
-            mobsfReport = getJSONObject("mobsf_report").toMobSFReportInfo(),
+    private fun JSONObject.toPiCheckVersionReport(): PiCheckVersionReport =
+        PiCheckVersionReport(
+            versionApp = getJSONObject("version_app").toPiCheckVersionAppInfo(),
+            mobsfReport = getJSONObject("mobsf_report").toPiCheckMobSFReport(),
         )
 
-    private fun JSONObject.toVersionAppInfo(): VersionAppInfo =
-        VersionAppInfo(
+    private fun JSONObject.toPiCheckVersionAppInfo(): PiCheckVersionAppInfo =
+        PiCheckVersionAppInfo(
             idApp = getString("id_app"),
             version = getString("version"),
             versionCode = optNullableInt("version_code"),
@@ -195,8 +212,8 @@ object PiCheckApiClient {
             rutaApk = optNullableString("ruta_apk"),
         )
 
-    private fun JSONObject.toMobSFReportInfo(): MobSFReportInfo =
-        MobSFReportInfo(
+    private fun JSONObject.toPiCheckMobSFReport(): PiCheckMobSFReport =
+        PiCheckMobSFReport(
             available = optBoolean("available", false),
             hashMobsf = optNullableString("hash_mobsf"),
             rutaInforme = optNullableString("ruta_informe"),

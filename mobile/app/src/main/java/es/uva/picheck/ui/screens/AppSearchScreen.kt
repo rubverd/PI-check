@@ -62,7 +62,7 @@ import es.uva.picheck.ui.theme.PiCheckBlue
 import es.uva.picheck.ui.theme.PiCheckBurgundy
 import es.uva.picheck.ui.theme.PiCheckCardBorder
 import es.uva.picheck.ui.theme.PiCheckDarkText
-import es.uva.picheck.data.model.ComparisonAnalysisResult
+import es.uva.picheck.data.model.PiCheckComparisonAnalysis
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -83,7 +83,7 @@ fun AppSearchScreen() {
     var analyzedApps by remember { mutableStateOf<List<AnalyzedApp>>(emptyList()) }
     var selectedApps by remember { mutableStateOf<List<PlayStoreApp>>(emptyList()) }
 
-    var comparisonResult by remember { mutableStateOf<ComparisonAnalysisResult?>(null) }
+    var comparisonResult by remember { mutableStateOf<PiCheckComparisonAnalysis?>(null) }
 
     var isLoadingSearch by remember { mutableStateOf(false) }
     var isLoadingAnalyzed by remember { mutableStateOf(false) }
