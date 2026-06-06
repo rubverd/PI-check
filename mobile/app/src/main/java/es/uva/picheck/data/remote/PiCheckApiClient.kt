@@ -8,6 +8,8 @@ import es.uva.picheck.data.model.PlayStoreApp
 import es.uva.picheck.data.model.RegisteredAppVersion
 import es.uva.picheck.data.model.PiCheckVersionAppInfo
 import es.uva.picheck.data.model.PiCheckVersionReport
+import es.uva.picheck.data.model.VersionAppInfo
+import es.uva.picheck.data.model.VersionReportInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -144,6 +146,21 @@ object PiCheckApiClient {
                 latestVersion?.mobsfReportAvailable ?: false,
             ),
             versions = versions,
+        )
+    }
+
+    private fun JSONObject.toRegisteredAppVersion(): RegisteredAppVersion {
+        val integrationModel = parseIntegrationModel(optString("integration_model"))
+        return RegisteredAppVersion(
+            version = getString("version"),
+            versionCode = optNullableInt("version_code"),
+            versionDate = optNullableString("version_date"),
+            integrationModel = integrationModel,
+            integrationModelShort = optString("integration_model_short", integrationModel.shortLabel()),
+            mobsfStatus = optNullableString("mobsf_status"),
+            mobsfReportAvailable = optBoolean("mobsf_report_available", false),
+            apkSha256 = optNullableString("apk_sha256"),
+            rutaApk = optNullableString("ruta_apk"),
         )
     }
 
