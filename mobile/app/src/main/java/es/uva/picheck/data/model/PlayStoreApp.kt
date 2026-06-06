@@ -11,4 +11,8 @@ data class PlayStoreApp(
     val url: String? = null,
     val version: String? = null,
     val versionDate: String? = null,
+    val selectedVersion: String? = null,
+    val versionCode: Int? = null,
+    val integrationModel: IntegrationModel? = null,
+    val apkSha256: String? = null,
 )

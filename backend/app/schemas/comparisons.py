@@ -13,6 +13,10 @@ class SelectedAppMetadata(BaseModel):
     url: Optional[str] = None
     version: Optional[str] = None
     version_date: Optional[str] = None
+    selected_version: Optional[str] = None
+    version_code: Optional[int] = None
+    integration_model: Optional[str] = None
+    apk_sha256: Optional[str] = None
 
 
 class ComparisonRequest(BaseModel):
@@ -50,6 +54,7 @@ class VersionAppInfo(BaseModel):
     estado_mobsf: str
     hash_mobsf: Optional[str] = None
     ruta_informe_mobsf: Optional[str] = None
+    ruta_apk: Optional[str] = None
 
 
 class MobSFReportInfo(BaseModel):
