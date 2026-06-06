@@ -25,7 +25,7 @@ local.properties
 apks/
 downloads/
 results/
-data/
+/data/
 
 # IDE
 .idea/
@@ -53,3 +53,13 @@ backend/artifacts/reports/comparisons/
 
 __pycache__/
 *.pyc
+# APKs manuales locales
+backend/artifacts/manual_uploads/*
+!backend/artifacts/manual_uploads/.gitkeep
+
+# Certificados PI-check generados localmente
+nginx/certs/picheck_ca.key
+nginx/certs/picheck-server.key
+nginx/certs/picheck-server.csr
+nginx/certs/picheck-server.srl
+nginx/certs/picheck-server.openssl.cnf
