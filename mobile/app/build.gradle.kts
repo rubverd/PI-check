@@ -37,6 +37,20 @@ android {
     buildFeatures {
         compose = true
     }
+    sourceSets {
+        getByName("main") {
+            java.exclude(
+                "**/ComparisonModels.kt",
+                "**/ComparisonAnalysisResult.kt",
+                "**/VersionReportInfo.kt",
+                "**/VersionAppInfo.kt",
+                "**/MobSFReportInfo.kt",
+                "**/ComparisionModels.kt",
+                "**/ComparisionAnalysisResult.kt",
+            )
+        }
+    }
+
 }
 
 dependencies {
