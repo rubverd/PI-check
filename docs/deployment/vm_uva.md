@@ -241,3 +241,51 @@ En la app Android, la sección de aplicaciones registradas incluye `Subir APK`:
 4. La app muestra estado básico y refresca las aplicaciones registradas al terminar.
 
 No se implementa extracción automática de APKs instalados mediante `PackageManager`; queda como mejora futura.
+
+## Estructura de artifacts y limpieza
+
+- `backend/artifacts/tmp/apks`: directorio temporal para descargas de comparación. El backend elimina `_metadata_extracted`, APKs movidos y carpetas vacías al terminar la ingesta.
+- `backend/artifacts/tmp/uploads`: staging temporal para `POST /api/apps/upload-apk`; debe quedar sin archivos tras una subida correcta o duplicada.
+- `backend/artifacts/apks`: almacenamiento gestionado persistente. Las nuevas `version_app.ruta_apk` deben apuntar siempre a `/app/artifacts/apks/{id_app}/{version}/...`.
+- `backend/artifacts/manual_uploads`: entrada manual para `register-local-apk`; el original se conserva y se copia a almacenamiento gestionado si procede.
+- `backend/artifacts/reports/mobsf`: informes MobSF persistentes reutilizables.
+
+Comando para inspeccionar rutas guardadas:
+
+```bash
+docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+SELECT id_app, version, estado_mobsf, ruta_apk, ruta_informe_mobsf
+FROM version_app
+ORDER BY id_app, version;
+"
+```
+
+Para reparar filas antiguas con `ruta_apk` nula, inexistente o apuntando a `/app/artifacts/tmp`:
+
+```bash
+docker compose exec backend python scripts/repair_apk_storage_paths.py
+```
+
+El script calcula `apk_sha256` si falta, mueve/copía el archivo a `APK_STORAGE_DIR`, actualiza `version_app.ruta_apk` y deja avisos `[REPAIR]` para registros que ya no tienen archivo origen.
+
+## Reutilización de MobSF
+
+Antes de lanzar MobSF, el backend comprueba:
+
+1. Informe válido por versión exacta (`SUCCESS`, `hash_mobsf` y JSON existente).
+2. Informe ya presente en la ruta canónica `/app/artifacts/reports/mobsf/{id_app}/{version}/mobsf_report.json`.
+3. Informe de otra versión con el mismo `apk_sha256`.
+
+Solo si no hay informe reutilizable y existe APK disponible se lanza un análisis nuevo.
+
+## Organización Android
+
+La pantalla principal queda separada en:
+
+```text
+Registradas | Buscar | Subir APK
+```
+
+`Registradas` y `Buscar` mantienen visibles los dos huecos de comparación. `Subir APK` se centra en importar un archivo seleccionado con Storage Access Framework; después de una subida correcta se refresca la lista de registradas.
+
+La extracción de APKs instaladas se mantiene como funcionalidad experimental/documentada. En Android 11+ hay restricciones de visibilidad de paquetes, y las apps instaladas como App Bundle pueden tener `splitSourceDirs`; si no se empaquetan base + splits de forma explícita, no debe ignorarse ese caso silenciosamente.

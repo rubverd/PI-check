@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import shutil
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -214,13 +215,16 @@ class AppRegistrationService:
         )
         messages.append(f"[APK] Ingestando archivo APK/XAPK/APKS/APKM: {path}.")
 
-        extracted_metadata = extract_apk_metadata(
-            apk_path=path,
-            fallback_app_id=fallback_app_id or f"manual.{path.stem}",
-            fallback_version=fallback_version,
-            fallback_category=category,
-            fallback_version_date=fallback_version_date,
-        )
+        try:
+            extracted_metadata = extract_apk_metadata(
+                apk_path=path,
+                fallback_app_id=fallback_app_id or f"manual.{path.stem}",
+                fallback_version=fallback_version,
+                fallback_category=category,
+                fallback_version_date=fallback_version_date,
+            )
+        finally:
+            self._cleanup_metadata_extraction_dir(path, messages)
 
         messages.append(
             "[METADATA] APK detectado como "
@@ -265,7 +269,54 @@ class AppRegistrationService:
                 existing_version.version,
             )
 
-            existing_version.version_code = extracted_metadata.version_code
+            existing_apk_path = (
+                Path(existing_version.ruta_apk) if existing_version.ruta_apk else None
+            )
+            has_valid_managed_apk = self._is_valid_managed_apk_path(existing_apk_path)
+
+            if has_valid_managed_apk:
+                messages.append(
+                    "[DEDUP] Versión existente con APK gestionado. "
+                    "Se elimina temporal y se reutiliza ruta_apk."
+                )
+                logger.info(
+                    "[DEDUP] Versión existente con APK gestionado app_id=%s version=%s ruta_apk=%s",
+                    existing_version.id_app,
+                    existing_version.version,
+                    existing_version.ruta_apk,
+                )
+                if cleanup_source_if_duplicate:
+                    self._cleanup_source_file(path, messages)
+            else:
+                messages.append(
+                    "[DEDUP] Versión existente sin APK gestionado válido. "
+                    "Se conserva APK descargado/subido en almacenamiento gestionado."
+                )
+                logger.info(
+                    "[DEDUP] Versión existente sin ruta_apk válida app_id=%s version=%s ruta_apk=%s",
+                    existing_version.id_app,
+                    existing_version.version,
+                    existing_version.ruta_apk,
+                )
+                managed_apk_path = self._store_apk(
+                    source_path=path,
+                    metadata=extracted_metadata,
+                    move_source=move_source_to_storage,
+                    messages=messages,
+                )
+                existing_version.ruta_apk = str(managed_apk_path)
+                messages.append(
+                    f"[DB] ruta_apk actualizada para versión existente: {managed_apk_path}."
+                )
+                logger.info(
+                    "[DB] ruta_apk actualizada app_id=%s version=%s ruta_apk=%s",
+                    existing_version.id_app,
+                    existing_version.version,
+                    managed_apk_path,
+                )
+
+            if extracted_metadata.version_code is not None:
+                existing_version.version_code = extracted_metadata.version_code
             existing_version.fecha_version = (
                 extracted_metadata.fecha_version or existing_version.fecha_version
             )
@@ -289,8 +340,7 @@ class AppRegistrationService:
             if existing_application is None:
                 saved_application = self.application_repository.save(saved_application)
 
-            if cleanup_source_if_duplicate:
-                self._cleanup_source_file(path, messages)
+            self._cleanup_download_parent_dirs(path, messages)
 
             return PreparedAppVersion(
                 selected_app=_selected_metadata_from_saved(
@@ -342,7 +392,9 @@ class AppRegistrationService:
             source_path=path,
             metadata=extracted_metadata,
             move_source=move_source_to_storage,
+            messages=messages,
         )
+        self._cleanup_download_parent_dirs(path, messages)
 
         app_version = AppVersion(
             id_app=extracted_metadata.id_app,
@@ -721,6 +773,7 @@ class AppRegistrationService:
         source_path: Path,
         metadata: ExtractedApkMetadata,
         move_source: bool,
+        messages: list[str] | None = None,
     ) -> Path:
         storage_dir = Path(os.getenv("APK_STORAGE_DIR", "/app/artifacts/apks"))
         safe_app_id = _safe_path_component(metadata.id_app)
@@ -738,14 +791,123 @@ class AppRegistrationService:
         if target_path.exists():
             if move_source and source_path.exists():
                 source_path.unlink()
+                if messages is not None:
+                    messages.append(
+                        f"[APK] APK temporal eliminado porque ya existía en almacenamiento gestionado: {source_path}."
+                    )
+                logger.info(
+                    "[APK] APK temporal eliminado porque el destino gestionado ya existía: %s",
+                    source_path,
+                )
             return target_path
 
         if move_source:
             shutil.move(str(source_path), str(target_path))
+            if messages is not None:
+                messages.append(
+                    f"[APK] APK temporal movido a almacenamiento gestionado: {target_path}."
+                )
+            logger.info(
+                "[APK] APK temporal movido a almacenamiento gestionado: %s -> %s",
+                source_path,
+                target_path,
+            )
         else:
             shutil.copy2(source_path, target_path)
+            if messages is not None:
+                messages.append(
+                    f"[APK] APK copiado a almacenamiento gestionado: {target_path}."
+                )
+            logger.info(
+                "[APK] APK copiado a almacenamiento gestionado: %s -> %s",
+                source_path,
+                target_path,
+            )
 
         return target_path
+
+    def _is_valid_managed_apk_path(self, path: Path | None) -> bool:
+        if path is None:
+            return False
+
+        try:
+            resolved_path = path.resolve()
+            managed_dir = Path(
+                os.getenv("APK_STORAGE_DIR", "/app/artifacts/apks")
+            ).resolve()
+        except OSError:
+            return False
+
+        return (
+            resolved_path.exists()
+            and resolved_path.is_file()
+            and (resolved_path == managed_dir or managed_dir in resolved_path.parents)
+        )
+
+    def _cleanup_metadata_extraction_dir(
+        self, apk_path: Path, messages: list[str]
+    ) -> None:
+        extraction_dir = apk_path.parent / "_metadata_extracted"
+        if not extraction_dir.exists():
+            return
+
+        try:
+            shutil.rmtree(extraction_dir)
+            messages.append(
+                f"[APK] Limpiando directorio temporal de extracción: {extraction_dir}."
+            )
+            logger.info(
+                "[APK] Directorio temporal de extracción eliminado: %s", extraction_dir
+            )
+        except OSError as exc:
+            messages.append(
+                f"[APK] No se pudo limpiar directorio temporal de extracción {extraction_dir}: {exc}."
+            )
+            logger.warning(
+                "[APK] No se pudo limpiar directorio temporal de extracción %s: %s",
+                extraction_dir,
+                exc,
+            )
+
+    def _cleanup_download_parent_dirs(
+        self, source_path: Path, messages: list[str]
+    ) -> None:
+        tmp_root = Path(
+            os.getenv(
+                "APK_TMP_DIR", os.getenv("APK_OUTPUT_DIR", "/app/artifacts/tmp/apks")
+            )
+        ).resolve()
+
+        current: Path | None = None
+        with suppress(OSError):
+            current = source_path.parent.resolve()
+        if current is None:
+            return
+
+        while current != tmp_root and tmp_root in current.parents:
+            try:
+                current.rmdir()
+                messages.append(
+                    f"[APK] Directorio temporal de comparación eliminado por estar vacío: {current}."
+                )
+                logger.info(
+                    "[APK] Directorio temporal de comparación eliminado por estar vacío: %s",
+                    current,
+                )
+            except OSError:
+                break
+            current = current.parent
+
+        if current == tmp_root:
+            with suppress(OSError):
+                current.rmdir()
+                messages.append(
+                    f"[APK] Directorio temporal de comparación eliminado por estar vacío: {current}."
+                )
+                logger.info(
+                    "[APK] Directorio temporal raíz eliminado por estar vacío: %s",
+                    current,
+                )
 
     def _cleanup_source_file(self, path: Path, messages: list[str]) -> None:
         try:
@@ -753,6 +915,7 @@ class AppRegistrationService:
                 path.unlink()
                 messages.append(f"[DEDUP] Se elimina APK temporal duplicado: {path}.")
                 logger.info("[DEDUP] APK temporal duplicado eliminado: %s", path)
+                self._cleanup_download_parent_dirs(path, messages)
         except OSError as exc:
             messages.append(
                 f"[DEDUP] No se pudo eliminar APK temporal duplicado {path}: {exc}."

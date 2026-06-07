@@ -37,6 +37,7 @@ services:
       - "127.0.0.1:${PICHECK_API_PORT}:8088"
     volumes:
       - ./backend/artifacts:/app/artifacts
+      - ./scripts:/app/scripts:ro
     depends_on:
       postgres:
         condition: service_healthy

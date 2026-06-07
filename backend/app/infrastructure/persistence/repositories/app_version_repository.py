@@ -72,6 +72,36 @@ class AppVersionRepository:
 
         return self._to_domain(model)
 
+    def find_success_with_mobsf_by_apk_sha256(
+        self,
+        apk_sha256: str,
+        exclude_id_app: str | None = None,
+        exclude_version: str | None = None,
+    ) -> AppVersion | None:
+        stmt = (
+            select(AppVersionModel)
+            .where(AppVersionModel.apk_sha256 == apk_sha256)
+            .where(AppVersionModel.estado_mobsf == MobSFAnalysisStatus.SUCCESS.value)
+            .where(AppVersionModel.ruta_informe_mobsf.is_not(None))
+            .where(AppVersionModel.hash_mobsf.is_not(None))
+        )
+
+        if exclude_id_app is not None and exclude_version is not None:
+            stmt = stmt.where(
+                ~(
+                    (AppVersionModel.id_app == exclude_id_app)
+                    & (AppVersionModel.version == exclude_version)
+                )
+            )
+
+        stmt = stmt.limit(1)
+        model = self.db.execute(stmt).scalars().first()
+
+        if model is None:
+            return None
+
+        return self._to_domain(model)
+
     def find_latest_with_mobsf_report(self, id_app: str) -> AppVersion | None:
         stmt = (
             select(AppVersionModel)

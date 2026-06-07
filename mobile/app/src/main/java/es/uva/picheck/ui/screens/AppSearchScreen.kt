@@ -74,9 +74,16 @@ import kotlinx.coroutines.launch
 
 private val ElectricBlue = Color(0xFF2D5BFF)
 
+private enum class SegmentPosition {
+    START,
+    CENTER,
+    END
+}
+
 private enum class AppListMode {
     REGISTERED,
-    SEARCH
+    SEARCH,
+    UPLOAD
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,7 +104,7 @@ fun AppSearchScreen() {
     var selectedUploadUri by remember { mutableStateOf<Uri?>(null) }
     var selectedUploadName by remember { mutableStateOf<String?>(null) }
     var isUploadingApk by remember { mutableStateOf(false) }
-    var uploadStatus by remember { mutableStateOf("Selecciona un APK/XAPK/APKS/APKM para subirlo.") }
+    var uploadStatus by remember { mutableStateOf("Esperando selección de APK/XAPK/APKS/APKM.") }
 
     var statusMessage by remember {
         mutableStateOf("Selecciona dos aplicaciones para preparar su comparación.")
@@ -178,7 +185,7 @@ fun AppSearchScreen() {
     }
 
     LaunchedEffect(currentMode) {
-        if (currentMode == AppListMode.REGISTERED) {
+        if (currentMode == AppListMode.REGISTERED || currentMode == AppListMode.UPLOAD) {
             while (true) {
                 delay(5_000)
                 refreshRegisteredApps(showLoadingIndicator = false)
@@ -245,44 +252,46 @@ fun AppSearchScreen() {
                 .padding(innerPadding)
                 .padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
-            SelectedAppsPanel(
-                selectedApps = selectedApps,
-                onRemove = { appToRemove ->
-                    selectedApps = selectedApps.filterNot { it.selectionKey() == appToRemove.selectionKey() }
-                    statusMessage = "Aplicación eliminada de la selección."
-                },
-            )
+            if (currentMode != AppListMode.UPLOAD) {
+                SelectedAppsPanel(
+                    selectedApps = selectedApps,
+                    onRemove = { appToRemove ->
+                        selectedApps = selectedApps.filterNot { it.selectionKey() == appToRemove.selectionKey() }
+                        statusMessage = "Aplicación eliminada de la selección."
+                    },
+                )
 
-            Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-            Button(
-                onClick = {
-                    if (selectedApps.size == 2) {
-                        showDownloadProgress = true
-                    }
-                },
-                enabled = selectedApps.size == 2 && !isLoadingSearch,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = PiCheckBlue,
-                    contentColor = Color.White,
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Comparar aplicaciones")
+                Button(
+                    onClick = {
+                        if (selectedApps.size == 2) {
+                            showDownloadProgress = true
+                        }
+                    },
+                    enabled = selectedApps.size == 2 && !isLoadingSearch,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PiCheckBlue,
+                        contentColor = Color.White,
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Comparar aplicaciones")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = statusMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = PiCheckDarkText,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
             }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = statusMessage,
-                style = MaterialTheme.typography.bodySmall,
-                color = PiCheckDarkText,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
 
             AppModeSelector(
                 currentMode = currentMode,
@@ -292,6 +301,7 @@ fun AppSearchScreen() {
                     statusMessage = when (selectedMode) {
                         AppListMode.REGISTERED -> "Mostrando aplicaciones registradas en el servidor."
                         AppListMode.SEARCH -> "Busca aplicaciones para añadirlas a la comparación."
+                        AppListMode.UPLOAD -> "Importa APKs al servidor; después aparecerán en Registradas."
                     }
                 }
             )
@@ -308,53 +318,6 @@ fun AppSearchScreen() {
                             SectionTitle(text = "Aplicaciones registradas")
                         }
 
-                        item {
-                            UploadApkCard(
-                                selectedFileName = selectedUploadName,
-                                status = uploadStatus,
-                                isUploading = isUploadingApk,
-                                onPickFile = {
-                                    uploadLauncher.launch(
-                                        arrayOf(
-                                            "application/vnd.android.package-archive",
-                                            "application/zip",
-                                            "application/octet-stream",
-                                            "*/*",
-                                        )
-                                    )
-                                },
-                                onUpload = {
-                                    val uri = selectedUploadUri
-                                    val fileName = selectedUploadName
-
-                                    if (uri == null || fileName == null) {
-                                        uploadStatus = "Selecciona primero un archivo APK."
-                                        return@UploadApkCard
-                                    }
-
-                                    coroutineScope.launch {
-                                        isUploadingApk = true
-                                        uploadStatus = "Subiendo y registrando APK..."
-
-                                        try {
-                                            val result = PiCheckApiClient.uploadApk(
-                                                context = context,
-                                                uri = uri,
-                                                fileName = fileName,
-                                            )
-                                            uploadStatus = "Completado: $result"
-                                            selectedUploadUri = null
-                                            selectedUploadName = null
-                                            refreshRegisteredApps(showLoadingIndicator = true)
-                                        } catch (exception: Exception) {
-                                            uploadStatus = "Error subiendo APK: ${exception.message}"
-                                        } finally {
-                                            isUploadingApk = false
-                                        }
-                                    }
-                                },
-                            )
-                        }
 
                         if (isLoadingAnalyzed) {
                             item {
@@ -441,6 +404,69 @@ fun AppSearchScreen() {
                             }
                         }
                     }
+
+                    AppListMode.UPLOAD -> {
+                        item {
+                            SectionTitle(text = "Subir APK")
+                        }
+
+                        item {
+                            UploadApkCard(
+                                selectedFileName = selectedUploadName,
+                                status = uploadStatus,
+                                isUploading = isUploadingApk,
+                                onPickFile = {
+                                    uploadLauncher.launch(
+                                        arrayOf(
+                                            "application/vnd.android.package-archive",
+                                            "application/zip",
+                                            "application/octet-stream",
+                                            "*/*",
+                                        )
+                                    )
+                                },
+                                onUpload = {
+                                    val uri = selectedUploadUri
+                                    val fileName = selectedUploadName
+
+                                    if (uri == null || fileName == null) {
+                                        uploadStatus = "Selecciona primero un archivo APK."
+                                        return@UploadApkCard
+                                    }
+
+                                    coroutineScope.launch {
+                                        isUploadingApk = true
+                                        uploadStatus = "Subiendo APK... Registrando versión..."
+
+                                        try {
+                                            val result = PiCheckApiClient.uploadApk(
+                                                context = context,
+                                                uri = uri,
+                                                fileName = fileName,
+                                            )
+                                            uploadStatus = if (result.contains("ya estaba registrada")) {
+                                                "La versión ya estaba registrada: $result"
+                                            } else {
+                                                "APK registrado correctamente: $result"
+                                            }
+                                            selectedUploadUri = null
+                                            selectedUploadName = null
+                                            refreshRegisteredApps(showLoadingIndicator = true)
+                                            currentMode = AppListMode.REGISTERED
+                                        } catch (exception: Exception) {
+                                            uploadStatus = "Error al subir APK: ${exception.message}"
+                                        } finally {
+                                            isUploadingApk = false
+                                        }
+                                    }
+                                },
+                            )
+                        }
+
+                        item {
+                            InstalledAppsExperimentalCard()
+                        }
+                    }
                 }
             }
         }
@@ -469,7 +495,7 @@ private fun AppModeSelector(
             ModeSelectorSegment(
                 text = "Registradas",
                 isSelected = currentMode == AppListMode.REGISTERED,
-                isLeft = true,
+                position = SegmentPosition.START,
                 selectedColor = PiCheckBurgundy,
                 modifier = Modifier.weight(1f),
                 onClick = {
@@ -480,11 +506,22 @@ private fun AppModeSelector(
             ModeSelectorSegment(
                 text = "Buscar",
                 isSelected = currentMode == AppListMode.SEARCH,
-                isLeft = false,
+                position = SegmentPosition.CENTER,
                 selectedColor = PiCheckBlue,
                 modifier = Modifier.weight(1f),
                 onClick = {
                     onModeSelected(AppListMode.SEARCH)
+                },
+            )
+
+            ModeSelectorSegment(
+                text = "Subir APK",
+                isSelected = currentMode == AppListMode.UPLOAD,
+                position = SegmentPosition.END,
+                selectedColor = ElectricBlue,
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    onModeSelected(AppListMode.UPLOAD)
                 },
             )
         }
@@ -495,20 +532,20 @@ private fun AppModeSelector(
 private fun ModeSelectorSegment(
     text: String,
     isSelected: Boolean,
-    isLeft: Boolean,
+    position: SegmentPosition,
     selectedColor: Color,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val shape = if (isLeft) {
-        RoundedCornerShape(
+    val shape = when (position) {
+        SegmentPosition.START -> RoundedCornerShape(
             topStart = 22.dp,
             bottomStart = 22.dp,
             topEnd = 10.dp,
             bottomEnd = 10.dp,
         )
-    } else {
-        RoundedCornerShape(
+        SegmentPosition.CENTER -> RoundedCornerShape(10.dp)
+        SegmentPosition.END -> RoundedCornerShape(
             topStart = 10.dp,
             bottomStart = 10.dp,
             topEnd = 22.dp,
@@ -611,6 +648,37 @@ private fun UploadApkCard(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun InstalledAppsExperimentalCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, PiCheckCardBorder),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Extraer APK instalada",
+                color = PiCheckDarkText,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "Funcionalidad experimental documentada: se prioriza la subida segura desde archivo. Las apps instaladas pueden usar split APKs y restricciones de visibilidad en Android 11+.",
+                color = PiCheckDarkText,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = "Futura mejora: listar apps lanzables, detectar sourceDir/splitSourceDirs y subir solo APK base simple o empaquetar splits de forma explícita.",
+                color = PiCheckDarkText,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

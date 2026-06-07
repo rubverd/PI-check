@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -13,7 +14,6 @@ from app.infrastructure.persistence.repositories.app_version_repository import (
     AppVersionRepository,
 )
 from app.infrastructure.storage.report_storage import ReportStorage
-
 
 logger = logging.getLogger("pi-check")
 
@@ -49,36 +49,14 @@ class AppAnalysisService:
             f"versión {app_version.version}."
         )
 
-        if (
-            app_version.estado_mobsf == MobSFAnalysisStatus.SUCCESS
-            and app_version.ruta_informe_mobsf
-            and app_version.hash_mobsf
-        ):
-            loaded_report = self._load_existing_mobsf_report(app_version)
-
-            if loaded_report is not None:
-                messages.append(
-                    f"[MOBSF] Se reutiliza informe existente para "
-                    f"{selected_app.title} versión {app_version.version}."
-                )
-
-                logger.info(
-                    "[MOBSF] Informe reutilizado para app_id=%s version=%s",
-                    app_version.id_app,
-                    app_version.version,
-                )
-
-                return (
-                    VersionReport(
-                        version_app=app_version,
-                        mobsf_report=loaded_report,
-                    ),
-                    messages,
-                )
-
-            messages.append(
-                "[MOBSF] La versión tenía referencia a informe, "
-                "pero el JSON no se ha podido cargar. Se intentará regenerar."
+        reusable_report = self._find_reusable_mobsf_report(app_version, messages)
+        if reusable_report is not None:
+            return (
+                VersionReport(
+                    version_app=reusable_report.version_app,
+                    mobsf_report=reusable_report.mobsf_report,
+                ),
+                messages,
             )
 
         if prepared_app.apk_path is None:
@@ -207,6 +185,115 @@ class AppAnalysisService:
             ),
             messages,
         )
+
+    def _find_reusable_mobsf_report(
+        self,
+        app_version,
+        messages: list[str],
+    ) -> VersionReport | None:
+        if (
+            app_version.estado_mobsf == MobSFAnalysisStatus.SUCCESS
+            and app_version.ruta_informe_mobsf
+            and app_version.hash_mobsf
+        ):
+            loaded_report = self._load_existing_mobsf_report(app_version)
+            if loaded_report is not None:
+                messages.append(
+                    "[MOBSF] Reutilizando informe existente por versión exacta."
+                )
+                logger.info(
+                    "[MOBSF] Reutilizando informe existente por versión exacta app_id=%s version=%s path=%s",
+                    app_version.id_app,
+                    app_version.version,
+                    app_version.ruta_informe_mobsf,
+                )
+                return VersionReport(
+                    version_app=app_version, mobsf_report=loaded_report
+                )
+
+            messages.append(
+                "[MOBSF] La versión estaba marcada como SUCCESS, pero el informe no existe o no se puede cargar."
+            )
+
+        canonical_report = self.report_storage.mobsf_report_path(
+            id_app=app_version.id_app,
+            version=app_version.version,
+        )
+        canonical_data = self.report_storage.load_mobsf_report(str(canonical_report))
+        if canonical_data is not None:
+            hash_mobsf = app_version.hash_mobsf or app_version.apk_sha256 or "unknown"
+            updated_version = self.app_version_repository.update_mobsf_report(
+                id_app=app_version.id_app,
+                version=app_version.version,
+                hash_mobsf=hash_mobsf,
+                ruta_informe_mobsf=str(canonical_report),
+                estado_mobsf=MobSFAnalysisStatus.SUCCESS,
+            )
+            messages.append(
+                "[MOBSF] Informe encontrado en ruta canónica. Se actualiza BD y se reutiliza."
+            )
+            logger.info(
+                "[MOBSF] Informe canónico reutilizado app_id=%s version=%s path=%s",
+                app_version.id_app,
+                app_version.version,
+                canonical_report,
+            )
+            return VersionReport(
+                version_app=updated_version,
+                mobsf_report=MobSFReport(
+                    hash_mobsf=hash_mobsf,
+                    file_name=None,
+                    scan_type=None,
+                    ruta_informe=str(canonical_report),
+                    json_report=canonical_data,
+                ),
+            )
+
+        if app_version.apk_sha256:
+            matching_version = (
+                self.app_version_repository.find_success_with_mobsf_by_apk_sha256(
+                    apk_sha256=app_version.apk_sha256,
+                    exclude_id_app=app_version.id_app,
+                    exclude_version=app_version.version,
+                )
+            )
+            if matching_version is not None:
+                matching_report = self._load_existing_mobsf_report(matching_version)
+                if matching_report is not None:
+                    canonical_report.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(matching_report.ruta_informe, canonical_report)
+                    updated_version = self.app_version_repository.update_mobsf_report(
+                        id_app=app_version.id_app,
+                        version=app_version.version,
+                        hash_mobsf=matching_report.hash_mobsf,
+                        ruta_informe_mobsf=str(canonical_report),
+                        estado_mobsf=MobSFAnalysisStatus.SUCCESS,
+                    )
+                    messages.append(
+                        "[MOBSF] Reutilizando informe por apk_sha256 coincidente."
+                    )
+                    logger.info(
+                        "[MOBSF] Informe reutilizado por apk_sha256 app_id=%s version=%s source=%s target=%s",
+                        app_version.id_app,
+                        app_version.version,
+                        matching_report.ruta_informe,
+                        canonical_report,
+                    )
+                    matching_report.ruta_informe = str(canonical_report)
+                    return VersionReport(
+                        version_app=updated_version,
+                        mobsf_report=matching_report,
+                    )
+
+        messages.append(
+            "[MOBSF] No existe informe reutilizable. Se lanza análisis MobSF si hay APK disponible."
+        )
+        logger.info(
+            "[MOBSF] No existe informe reutilizable app_id=%s version=%s",
+            app_version.id_app,
+            app_version.version,
+        )
+        return None
 
     def _load_existing_mobsf_report(
         self,

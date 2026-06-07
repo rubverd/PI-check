@@ -195,3 +195,45 @@ Este endpoint requiere `python-multipart` y respeta `MAX_UPLOAD_APK_SIZE_MB`. ng
 ### Subida desde Android
 
 La app Android incluye una opción básica `Subir APK` en la sección de aplicaciones registradas. Usa el selector de archivos del sistema, sube el archivo por multipart a `/api/apps/upload-apk` y refresca `/api/apps/registered` al finalizar. Si cambias la URL pública del backend, mantén actualizado el `BASE_URL` centralizado en `PiCheckApiClient.kt`.
+
+### Estructura de artifacts y reparación de rutas antiguas
+
+Las rutas de artifacts tienen roles distintos:
+
+- `backend/artifacts/tmp/apks`: descargas temporales de `apkeep` usadas durante comparaciones o extracción de metadatos. Debe quedar limpio tras ingestas finalizadas.
+- `backend/artifacts/tmp/uploads`: staging temporal de subidas multipart antes de registrar/deduplicar.
+- `backend/artifacts/apks`: almacenamiento gestionado y persistente de APK/XAPK/APKS/APKM conservados. `version_app.ruta_apk` debe apuntar aquí.
+- `backend/artifacts/manual_uploads`: bandeja de entrada para APKs copiados manualmente al servidor; el registro conserva el original y copia la versión persistente a `artifacts/apks`.
+- `backend/artifacts/reports/mobsf`: informes MobSF persistentes; no se deben borrar al limpiar temporales.
+
+Para inspeccionar rutas guardadas en BD:
+
+```bash
+docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+SELECT id_app, version, estado_mobsf, ruta_apk, ruta_informe_mobsf
+FROM version_app
+ORDER BY id_app, version;
+"
+```
+
+Si existen filas antiguas con `ruta_apk` nula, inexistente o apuntando a `tmp`, usa el script de reparación:
+
+```bash
+docker compose exec backend python scripts/repair_apk_storage_paths.py
+```
+
+El script mueve a `APK_STORAGE_DIR` los APKs que todavía existan en `tmp`, actualiza `ruta_apk` y avisa con `[REPAIR]` si no puede reparar una fila porque el archivo ya no existe.
+
+### Organización Android
+
+La pantalla principal está separada en tres secciones:
+
+```text
+Registradas | Buscar | Subir APK
+```
+
+- `Registradas`: muestra apps y versiones ya registradas, con huecos de comparación visibles.
+- `Buscar`: mantiene la búsqueda de Google Play y los huecos de comparación visibles.
+- `Subir APK`: se centra solo en importar APKs al servidor y refresca `Registradas` al finalizar.
+
+La extracción de APKs instaladas queda documentada como mejora experimental: en Android 11+ puede requerir declarar visibilidad de paquetes (`<queries>` o `QUERY_ALL_PACKAGES`), y muchas apps instaladas desde bundles usan split APKs, por lo que no basta con subir siempre el APK base.
