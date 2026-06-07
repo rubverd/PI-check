@@ -113,6 +113,7 @@ class AppVersionRepository:
         existing.ruta_informe_mobsf = app_version.ruta_informe_mobsf
         existing.hash_mobsf = app_version.hash_mobsf
         existing.apk_sha256 = app_version.apk_sha256
+        existing.ruta_apk = app_version.ruta_apk
         existing.estado_mobsf = app_version.estado_mobsf.value
 
         self.db.flush()
@@ -153,6 +154,7 @@ class AppVersionRepository:
             ruta_informe_mobsf=model.ruta_informe_mobsf,
             hash_mobsf=model.hash_mobsf,
             apk_sha256=model.apk_sha256,
+            ruta_apk=model.ruta_apk,
             estado_mobsf=MobSFAnalysisStatus(model.estado_mobsf),
         )
 
@@ -167,5 +169,6 @@ class AppVersionRepository:
             ruta_informe_mobsf=app_version.ruta_informe_mobsf,
             hash_mobsf=app_version.hash_mobsf,
             apk_sha256=app_version.apk_sha256,
+            ruta_apk=app_version.ruta_apk,
             estado_mobsf=app_version.estado_mobsf.value,
         )

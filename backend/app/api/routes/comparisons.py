@@ -19,7 +19,6 @@ from app.schemas.comparisons import (
     VersionReportInfo,
 )
 
-
 logger = logging.getLogger("pi-check")
 
 router = APIRouter(
@@ -98,6 +97,7 @@ def _version_report_to_response(
             estado_mobsf=version_app.estado_mobsf.value,
             hash_mobsf=version_app.hash_mobsf,
             ruta_informe_mobsf=version_app.ruta_informe_mobsf,
+            ruta_apk=version_app.ruta_apk,
         ),
         mobsf_report=MobSFReportInfo(
             available=mobsf_report is not None,

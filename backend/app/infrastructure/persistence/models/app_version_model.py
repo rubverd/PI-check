@@ -55,6 +55,11 @@ class AppVersionModel(Base):
         nullable=True,
     )
 
+    ruta_apk: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
     estado_mobsf: Mapped[str] = mapped_column(
         String(30),
         nullable=False,

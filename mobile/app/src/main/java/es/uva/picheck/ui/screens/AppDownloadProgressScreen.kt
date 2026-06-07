@@ -42,7 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import es.uva.picheck.data.model.ComparisonAnalysisResult
+import es.uva.picheck.data.model.PiCheckComparisonAnalysis
 import es.uva.picheck.data.model.PlayStoreApp
 import es.uva.picheck.data.remote.PiCheckApiClient
 import es.uva.picheck.ui.theme.PiCheckBackground
@@ -58,7 +58,7 @@ import kotlinx.coroutines.launch
 fun AppDownloadProgressScreen(
     appA: PlayStoreApp,
     appB: PlayStoreApp,
-    onFinished: (ComparisonAnalysisResult) -> Unit,
+    onFinished: (PiCheckComparisonAnalysis) -> Unit,
     onBack: () -> Unit,
 ) {
     var progress by remember { mutableFloatStateOf(0.05f) }
