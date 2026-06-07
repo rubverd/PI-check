@@ -37,6 +37,10 @@ android {
     buildFeatures {
         compose = true
     }
+    // IMPORTANT: do not add Gradle file-exclusion rules here to hide stale model files.
+    // That workaround breaks Android Studio sync in this project.
+    // If stale local comparison model files remain after a pull, run:
+    //   ./scripts/clean_android_stale_models.sh
 }
 
 dependencies {

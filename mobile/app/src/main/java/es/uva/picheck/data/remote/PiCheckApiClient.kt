@@ -1,24 +1,37 @@
 package es.uva.picheck.data.remote
 
+import android.content.Context
+import android.net.Uri
 import es.uva.picheck.data.model.AnalyzedApp
-import es.uva.picheck.data.model.ComparisonAnalysisResult
+import es.uva.picheck.data.model.PiCheckComparisonAnalysis
 import es.uva.picheck.data.model.IntegrationModel
-import es.uva.picheck.data.model.MobSFReportInfo
+import es.uva.picheck.data.model.PiCheckMobSFReport
 import es.uva.picheck.data.model.PlayStoreApp
-import es.uva.picheck.data.model.VersionAppInfo
-import es.uva.picheck.data.model.VersionReportInfo
+import es.uva.picheck.data.model.RegisteredAppVersion
+import es.uva.picheck.data.model.PiCheckVersionAppInfo
+import es.uva.picheck.data.model.PiCheckVersionReport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.DataOutputStream
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
 
 object PiCheckApiClient {
-    private const val BASE_URL = "https://127.0.0.1:8443"
+    private object ApiEnvironment {
+        // Cambia solo esta constante para alternar entre entornos.
+        // Opciones útiles:
+        // - Portátil local / emulador: "https://10.0.2.2:8443"
+        // - adb reverse o dispositivo con túnel local: "https://127.0.0.1:8443"
+        // - VM UVA pública: "https://virtual.lab.inf.uva.es:20492"
+        const val BASE_URL = "https://virtual.lab.inf.uva.es:20492"
+    }
+
+    private val BASE_URL = ApiEnvironment.BASE_URL
 
     suspend fun searchApps(query: String): List<PlayStoreApp> = withContext(Dispatchers.IO) {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
@@ -35,14 +48,14 @@ object PiCheckApiClient {
         appA: PlayStoreApp,
         appB: PlayStoreApp,
         downloadApks: Boolean,
-    ): ComparisonAnalysisResult = withContext(Dispatchers.IO) {
+    ): PiCheckComparisonAnalysis = withContext(Dispatchers.IO) {
         val body = JSONObject()
             .put("app_a", appA.toComparisonJson())
             .put("app_b", appB.toComparisonJson())
             .put("download_apks", downloadApks)
 
         val response = post("/api/comparisons/request", body)
-        response.toComparisonAnalysisResult()
+        response.toPiCheckComparisonAnalysis()
     }
 
     suspend fun getRegisteredApps(): List<AnalyzedApp> = withContext(Dispatchers.IO) {
@@ -55,6 +68,79 @@ object PiCheckApiClient {
     }
 
     suspend fun getAnalyzedApps(): List<AnalyzedApp> = getRegisteredApps()
+
+    suspend fun uploadApk(
+        context: Context,
+        uri: Uri,
+        fileName: String,
+        title: String? = null,
+        developer: String? = null,
+        category: String? = null,
+        sourceLabel: String = "mobile_upload",
+        runMobsf: Boolean = false,
+    ): String = withContext(Dispatchers.IO) {
+        val boundary = "----PiCheckBoundary${System.currentTimeMillis()}"
+        val connection = (URL("$BASE_URL/api/apps/upload-apk").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 30_000
+            readTimeout = 800_000
+            doOutput = true
+            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            setRequestProperty("Accept", "application/json")
+        }
+
+        DataOutputStream(connection.outputStream).use { output ->
+            output.writeFormField(boundary, "title", title ?: fileName.substringBeforeLast('.'))
+            output.writeFormField(boundary, "developer", developer.orEmpty())
+            output.writeFormField(boundary, "category", category.orEmpty())
+            output.writeFormField(boundary, "source_label", sourceLabel)
+            output.writeFormField(boundary, "run_mobsf", runMobsf.toString())
+            output.writeFileField(context, uri, boundary, "file", fileName)
+            output.writeBytes("--$boundary--\r\n")
+            output.flush()
+        }
+
+        val json = JSONObject(connection.readResponse())
+        val app = json.getJSONObject("app")
+        val version = json.getJSONObject("version")
+        val alreadyRegistered = json.optBoolean("already_registered", false)
+        val status = if (alreadyRegistered) "ya estaba registrada" else "registrada"
+
+        "${app.getString("name")} ${version.getString("version")} $status"
+    }
+
+
+    private fun DataOutputStream.writeFormField(boundary: String, name: String, value: String) {
+        writeBytes("--$boundary\r\n")
+        writeBytes("Content-Disposition: form-data; name=\"$name\"\r\n\r\n")
+        writeBytes(value)
+        writeBytes("\r\n")
+    }
+
+    private fun DataOutputStream.writeFileField(
+        context: Context,
+        uri: Uri,
+        boundary: String,
+        fieldName: String,
+        fileName: String,
+    ) {
+        writeBytes("--$boundary\r\n")
+        writeBytes(
+            "Content-Disposition: form-data; name=\"$fieldName\"; filename=\"$fileName\"\r\n"
+        )
+        writeBytes("Content-Type: application/vnd.android.package-archive\r\n\r\n")
+
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read == -1) break
+                write(buffer, 0, read)
+            }
+        } ?: throw IllegalStateException("No se pudo abrir el APK seleccionado")
+
+        writeBytes("\r\n")
+    }
 
     private fun get(path: String): String {
         val connection = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {
@@ -110,43 +196,78 @@ object PiCheckApiClient {
         versionDate = optNullableString("version_date"),
     )
 
-    private fun JSONObject.toAnalyzedApp(): AnalyzedApp = AnalyzedApp(
-        appId = getString("app_id"),
-        name = getString("name"),
-        developer = optNullableString("developer"),
-        icon = optNullableString("icon"),
-        version = getString("version"),
-        category = optString("category", ""),
-        analysisDate = optString("analysis_date", ""),
-        integrationModel = when (optString("integration_model")) {
-            "health_connect", "HEALTH_CONNECT" -> IntegrationModel.HEALTH_CONNECT
-            "legacy", "LEGACY" -> IntegrationModel.LEGACY
-            else -> IntegrationModel.UNKNOWN
-        },
-        mobsfStatus = optNullableString("mobsf_status"),
-        mobsfReportAvailable = optBoolean("mobsf_report_available", false),
-    )
+    private fun JSONObject.toAnalyzedApp(): AnalyzedApp {
+        val versions: List<RegisteredAppVersion> = parseRegisteredAppVersions(
+            optJSONArray("versions")
+        )
+        val latestVersion: RegisteredAppVersion? = versions.firstOrNull()
+        val integrationModel = parseIntegrationModel(
+            optString("integration_model", latestVersion?.integrationModel?.name ?: "unknown")
+        )
 
-    private fun JSONObject.toComparisonAnalysisResult(): ComparisonAnalysisResult =
-        ComparisonAnalysisResult(
+        return AnalyzedApp(
+            appId = getString("app_id"),
+            name = getString("name"),
+            developer = optNullableString("developer"),
+            icon = optNullableString("icon"),
+            version = optString("version", latestVersion?.version ?: "No disponible"),
+            category = optString("category", ""),
+            analysisDate = optString("analysis_date", optString("version_date", "")),
+            integrationModel = integrationModel,
+            mobsfStatus = optNullableString("mobsf_status") ?: latestVersion?.mobsfStatus,
+            mobsfReportAvailable = optBoolean(
+                "mobsf_report_available",
+                latestVersion?.mobsfReportAvailable ?: false,
+            ),
+            versions = versions,
+        )
+    }
+
+    private fun parseRegisteredAppVersions(array: JSONArray?): List<RegisteredAppVersion> {
+        if (array == null) {
+            return emptyList()
+        }
+
+        return List(array.length()) { index: Int ->
+            parseRegisteredAppVersion(array.getJSONObject(index))
+        }
+    }
+
+    private fun parseRegisteredAppVersion(json: JSONObject): RegisteredAppVersion {
+        val integrationModel = parseIntegrationModel(json.optString("integration_model"))
+        return RegisteredAppVersion(
+            version = json.getString("version"),
+            versionCode = json.optNullableInt("version_code"),
+            versionDate = json.optNullableString("version_date"),
+            integrationModel = integrationModel,
+            integrationModelShort = json.optString("integration_model_short", integrationModel.shortLabel()),
+            mobsfStatus = json.optNullableString("mobsf_status"),
+            mobsfReportAvailable = json.optBoolean("mobsf_report_available", false),
+            apkSha256 = json.optNullableString("apk_sha256"),
+            rutaApk = json.optNullableString("ruta_apk"),
+        )
+    }
+
+    private fun JSONObject.toPiCheckComparisonAnalysis(): PiCheckComparisonAnalysis =
+        PiCheckComparisonAnalysis(
             comparisonId = getString("comparison_id"),
             status = getString("status"),
             message = getString("message"),
             messages = getJSONArray("messages").toStringList(),
-            appA = getJSONObject("app_a").toVersionReportInfo(),
-            appB = getJSONObject("app_b").toVersionReportInfo(),
+            appA = getJSONObject("app_a").toPiCheckVersionReport(),
+            appB = getJSONObject("app_b").toPiCheckVersionReport(),
             idIndiceAplicado = optNullableString("id_indice_aplicado"),
             rawJson = toString(2),
         )
 
-    private fun JSONObject.toVersionReportInfo(): VersionReportInfo =
-        VersionReportInfo(
-            versionApp = getJSONObject("version_app").toVersionAppInfo(),
-            mobsfReport = getJSONObject("mobsf_report").toMobSFReportInfo(),
+    private fun JSONObject.toPiCheckVersionReport(): PiCheckVersionReport =
+        PiCheckVersionReport(
+            versionApp = getJSONObject("version_app").toPiCheckVersionAppInfo(),
+            mobsfReport = getJSONObject("mobsf_report").toPiCheckMobSFReport(),
         )
 
-    private fun JSONObject.toVersionAppInfo(): VersionAppInfo =
-        VersionAppInfo(
+    private fun JSONObject.toPiCheckVersionAppInfo(): PiCheckVersionAppInfo =
+        PiCheckVersionAppInfo(
             idApp = getString("id_app"),
             version = getString("version"),
             versionCode = optNullableInt("version_code"),
@@ -157,10 +278,11 @@ object PiCheckApiClient {
             estadoMobsf = getString("estado_mobsf"),
             hashMobsf = optNullableString("hash_mobsf"),
             rutaInformeMobsf = optNullableString("ruta_informe_mobsf"),
+            rutaApk = optNullableString("ruta_apk"),
         )
 
-    private fun JSONObject.toMobSFReportInfo(): MobSFReportInfo =
-        MobSFReportInfo(
+    private fun JSONObject.toPiCheckMobSFReport(): PiCheckMobSFReport =
+        PiCheckMobSFReport(
             available = optBoolean("available", false),
             hashMobsf = optNullableString("hash_mobsf"),
             rutaInforme = optNullableString("ruta_informe"),
@@ -179,6 +301,22 @@ object PiCheckApiClient {
         .putNullable("url", url)
         .putNullable("version", version)
         .putNullable("version_date", versionDate)
+        .putNullable("selected_version", selectedVersion)
+        .putNullable("version_code", versionCode)
+        .putNullable("integration_model", integrationModel?.name)
+        .putNullable("apk_sha256", apkSha256)
+
+    private fun parseIntegrationModel(value: String): IntegrationModel = when (value) {
+        "health_connect", "HEALTH_CONNECT" -> IntegrationModel.HEALTH_CONNECT
+        "legacy", "LEGACY" -> IntegrationModel.LEGACY
+        else -> IntegrationModel.UNKNOWN
+    }
+
+    private fun IntegrationModel.shortLabel(): String = when (this) {
+        IntegrationModel.HEALTH_CONNECT -> "HC"
+        IntegrationModel.LEGACY -> "L"
+        IntegrationModel.UNKNOWN -> "?"
+    }
 
     private fun JSONArray.toStringList(): List<String> =
         List(length()) { index -> optString(index) }
