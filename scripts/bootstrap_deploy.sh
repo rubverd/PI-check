@@ -31,7 +31,7 @@ Options:
 
 Useful variables:
   PUBLIC_DNS, PUBLIC_IP, VM_IP, PICHECK_HTTPS_PORT, POSTGRES_PASSWORD, MOBSF_API_KEY
-  POSTGRES_USER, POSTGRES_DB, CA_DIR, CERT_DAYS, SERVER_CN, EXTRA_DNS, EXTRA_IP, SAN_LIST
+  POSTGRES_USER, POSTGRES_DB, MAX_UPLOAD_APK_SIZE_MB, CA_DIR, CERT_DAYS, SERVER_CN, EXTRA_DNS, EXTRA_IP, SAN_LIST
 USAGE
 }
 
@@ -70,6 +70,7 @@ POSTGRES_USER="${POSTGRES_USER:-picheck}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-picheck}"
 POSTGRES_DB="${POSTGRES_DB:-picheck}"
 MOBSF_API_KEY="${MOBSF_API_KEY:-picheck}"
+MAX_UPLOAD_APK_SIZE_MB="${MAX_UPLOAD_APK_SIZE_MB:-300}"
 CERT_DAYS="${CERT_DAYS:-825}"
 SERVER_CN="${SERVER_CN:-$PUBLIC_DNS}"
 CA_DIR="${CA_DIR:-$HOME/.picheck/certs}"
@@ -77,6 +78,8 @@ CA_DIR="${CA_DIR:-$HOME/.picheck/certs}"
 ARTIFACT_DIRS=(
   "backend/artifacts/manual_uploads"
   "backend/artifacts/tmp/apks"
+  "backend/artifacts/tmp/uploads"
+  "backend/artifacts/apks"
   "backend/artifacts/reports/mobsf"
   "backend/artifacts/reports/mastg"
   "backend/artifacts/reports/comparisons"
@@ -218,6 +221,9 @@ if [[ "$SKIP_ENV" != "true" ]]; then
     set_env_value "$ENV_FILE" "DATABASE_URL" "$DATABASE_URL"
     set_env_value "$ENV_FILE" "MOBSF_API_KEY" "$MOBSF_API_KEY"
     set_env_value "$ENV_FILE" "PICHECK_HTTPS_PORT" "$PICHECK_HTTPS_PORT"
+    set_env_value "$ENV_FILE" "APK_STORAGE_DIR" "/app/artifacts/apks"
+    set_env_value "$ENV_FILE" "APK_UPLOAD_STAGING_DIR" "/app/artifacts/tmp/uploads"
+    set_env_value "$ENV_FILE" "MAX_UPLOAD_APK_SIZE_MB" "$MAX_UPLOAD_APK_SIZE_MB"
   fi
 else
   echo "[ENV] Skipping .env creation/update because --skip-env/SKIP_ENV=true was provided"

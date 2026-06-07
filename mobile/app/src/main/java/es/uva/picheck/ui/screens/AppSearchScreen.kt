@@ -1,5 +1,10 @@
 package es.uva.picheck.ui.screens
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -47,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,6 +94,10 @@ fun AppSearchScreen() {
     var isLoadingSearch by remember { mutableStateOf(false) }
     var isLoadingAnalyzed by remember { mutableStateOf(false) }
     var showDownloadProgress by remember { mutableStateOf(false) }
+    var selectedUploadUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedUploadName by remember { mutableStateOf<String?>(null) }
+    var isUploadingApk by remember { mutableStateOf(false) }
+    var uploadStatus by remember { mutableStateOf("Selecciona un APK/XAPK/APKS/APKM para subirlo.") }
 
     var statusMessage by remember {
         mutableStateOf("Selecciona dos aplicaciones para preparar su comparación.")
@@ -98,6 +108,17 @@ fun AppSearchScreen() {
     }
 
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val uploadLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            val displayName = context.displayNameForUri(uri)
+            selectedUploadUri = uri
+            selectedUploadName = displayName
+            uploadStatus = "Archivo seleccionado: $displayName"
+        }
+    }
 
     fun toggleSelectedApp(app: PlayStoreApp) {
         selectedApps = when {
@@ -287,6 +308,54 @@ fun AppSearchScreen() {
                             SectionTitle(text = "Aplicaciones registradas")
                         }
 
+                        item {
+                            UploadApkCard(
+                                selectedFileName = selectedUploadName,
+                                status = uploadStatus,
+                                isUploading = isUploadingApk,
+                                onPickFile = {
+                                    uploadLauncher.launch(
+                                        arrayOf(
+                                            "application/vnd.android.package-archive",
+                                            "application/zip",
+                                            "application/octet-stream",
+                                            "*/*",
+                                        )
+                                    )
+                                },
+                                onUpload = {
+                                    val uri = selectedUploadUri
+                                    val fileName = selectedUploadName
+
+                                    if (uri == null || fileName == null) {
+                                        uploadStatus = "Selecciona primero un archivo APK."
+                                        return@UploadApkCard
+                                    }
+
+                                    coroutineScope.launch {
+                                        isUploadingApk = true
+                                        uploadStatus = "Subiendo y registrando APK..."
+
+                                        try {
+                                            val result = PiCheckApiClient.uploadApk(
+                                                context = context,
+                                                uri = uri,
+                                                fileName = fileName,
+                                            )
+                                            uploadStatus = "Completado: $result"
+                                            selectedUploadUri = null
+                                            selectedUploadName = null
+                                            refreshRegisteredApps(showLoadingIndicator = true)
+                                        } catch (exception: Exception) {
+                                            uploadStatus = "Error subiendo APK: ${exception.message}"
+                                        } finally {
+                                            isUploadingApk = false
+                                        }
+                                    }
+                                },
+                            )
+                        }
+
                         if (isLoadingAnalyzed) {
                             item {
                                 LoadingCard(message = "Cargando aplicaciones registradas...")
@@ -463,6 +532,86 @@ private fun ModeSelectorSegment(
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.bodyMedium,
         )
+    }
+}
+
+@Composable
+private fun UploadApkCard(
+    selectedFileName: String?,
+    status: String,
+    isUploading: Boolean,
+    onPickFile: () -> Unit,
+    onUpload: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, PiCheckCardBorder),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "Subir APK",
+                color = PiCheckDarkText,
+                fontWeight = FontWeight.Bold,
+            )
+
+            Text(
+                text = selectedFileName ?: "Ningún archivo seleccionado",
+                color = PiCheckDarkText,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            Text(
+                text = status,
+                color = PiCheckDarkText,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = onPickFile,
+                    enabled = !isUploading,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PiCheckBurgundy,
+                        contentColor = Color.White,
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("Seleccionar")
+                }
+
+                Button(
+                    onClick = onUpload,
+                    enabled = selectedFileName != null && !isUploading,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PiCheckBlue,
+                        contentColor = Color.White,
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    if (isUploading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text("Subir")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -720,7 +869,12 @@ private fun RegisteredVersionRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = version.mobsfLabel(),
+                text = "Fecha: ${version.versionDateLabel()}",
+                color = PiCheckDarkText,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                text = version.analysisLabel(),
                 color = PiCheckDarkText,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -1038,10 +1192,19 @@ private fun IntegrationModel.shortLabel(): String = when (this) {
     IntegrationModel.UNKNOWN -> "?"
 }
 
-private fun RegisteredAppVersion.mobsfLabel(): String = when (mobsfStatus) {
-    "success" -> if (mobsfReportAvailable) "MobSF OK" else "Pendiente"
-    "pending" -> "Pendiente"
-    "error" -> "Error"
-    "not_analyzed", null -> "No analizada"
-    else -> mobsfStatus
+private fun RegisteredAppVersion.analysisLabel(): String =
+    if (mobsfReportAvailable) "Analizada: Sí" else "Analizada: No"
+
+private fun RegisteredAppVersion.versionDateLabel(): String =
+    versionDate?.takeIf { it.isNotBlank() } ?: "Fecha desconocida"
+
+private fun Context.displayNameForUri(uri: Uri): String {
+    contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (nameIndex >= 0 && cursor.moveToFirst()) {
+            return cursor.getString(nameIndex)
+        }
+    }
+
+    return uri.lastPathSegment?.substringAfterLast('/') ?: "selected.apk"
 }

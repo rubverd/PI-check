@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from uuid import uuid4
 
@@ -10,6 +11,8 @@ from app.application.services.app_registration_service import (
 )
 from app.domain.entities.comparison_result import ComparisonResult
 from app.schemas.comparisons import ComparisonRequest
+
+logger = logging.getLogger("pi-check")
 
 
 @dataclass
@@ -32,6 +35,15 @@ class ComparisonService:
         request: ComparisonRequest,
     ) -> ComparisonExecutionResult:
         comparison_id = str(uuid4())
+
+        logger.info(
+            "[COMPARISON] Solicitud recibida comparison_id=%s app_a=%s version_a=%s app_b=%s version_b=%s",
+            comparison_id,
+            request.app_a.app_id,
+            request.app_a.selected_version or request.app_a.version,
+            request.app_b.app_id,
+            request.app_b.selected_version or request.app_b.version,
+        )
 
         messages: list[str] = [
             f"[COMPARISON] Solicitud creada con identificador {comparison_id}.",

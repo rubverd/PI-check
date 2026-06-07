@@ -1,5 +1,7 @@
 package es.uva.picheck.data.remote
 
+import android.content.Context
+import android.net.Uri
 import es.uva.picheck.data.model.AnalyzedApp
 import es.uva.picheck.data.model.PiCheckComparisonAnalysis
 import es.uva.picheck.data.model.IntegrationModel
@@ -13,6 +15,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.DataOutputStream
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URLEncoder
@@ -65,6 +68,79 @@ object PiCheckApiClient {
     }
 
     suspend fun getAnalyzedApps(): List<AnalyzedApp> = getRegisteredApps()
+
+    suspend fun uploadApk(
+        context: Context,
+        uri: Uri,
+        fileName: String,
+        title: String? = null,
+        developer: String? = null,
+        category: String? = null,
+        sourceLabel: String = "mobile_upload",
+        runMobsf: Boolean = false,
+    ): String = withContext(Dispatchers.IO) {
+        val boundary = "----PiCheckBoundary${System.currentTimeMillis()}"
+        val connection = (URL("$BASE_URL/api/apps/upload-apk").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 30_000
+            readTimeout = 800_000
+            doOutput = true
+            setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            setRequestProperty("Accept", "application/json")
+        }
+
+        DataOutputStream(connection.outputStream).use { output ->
+            output.writeFormField(boundary, "title", title ?: fileName.substringBeforeLast('.'))
+            output.writeFormField(boundary, "developer", developer.orEmpty())
+            output.writeFormField(boundary, "category", category.orEmpty())
+            output.writeFormField(boundary, "source_label", sourceLabel)
+            output.writeFormField(boundary, "run_mobsf", runMobsf.toString())
+            output.writeFileField(context, uri, boundary, "file", fileName)
+            output.writeBytes("--$boundary--\r\n")
+            output.flush()
+        }
+
+        val json = JSONObject(connection.readResponse())
+        val app = json.getJSONObject("app")
+        val version = json.getJSONObject("version")
+        val alreadyRegistered = json.optBoolean("already_registered", false)
+        val status = if (alreadyRegistered) "ya estaba registrada" else "registrada"
+
+        "${app.getString("name")} ${version.getString("version")} $status"
+    }
+
+
+    private fun DataOutputStream.writeFormField(boundary: String, name: String, value: String) {
+        writeBytes("--$boundary\r\n")
+        writeBytes("Content-Disposition: form-data; name=\"$name\"\r\n\r\n")
+        writeBytes(value)
+        writeBytes("\r\n")
+    }
+
+    private fun DataOutputStream.writeFileField(
+        context: Context,
+        uri: Uri,
+        boundary: String,
+        fieldName: String,
+        fileName: String,
+    ) {
+        writeBytes("--$boundary\r\n")
+        writeBytes(
+            "Content-Disposition: form-data; name=\"$fieldName\"; filename=\"$fileName\"\r\n"
+        )
+        writeBytes("Content-Type: application/vnd.android.package-archive\r\n\r\n")
+
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read == -1) break
+                write(buffer, 0, read)
+            }
+        } ?: throw IllegalStateException("No se pudo abrir el APK seleccionado")
+
+        writeBytes("\r\n")
+    }
 
     private fun get(path: String): String {
         val connection = (URL("$BASE_URL$path").openConnection() as HttpURLConnection).apply {

@@ -134,3 +134,64 @@ No subas al repositorio:
 ```bash
 ./scripts/clean_android_stale_models.sh
 ```
+
+## Ingesta de APKs y deduplicación
+
+El backend usa una lógica centralizada de ingesta para APKs descargados con `apkeep`, APKs locales del servidor y APKs subidos por multipart. El flujo optimizado comprueba primero si la versión solicitada ya existe; si existe, evita descargar APK, reutiliza `ruta_apk` y reutiliza el informe MobSF si está disponible. Si la versión no es concreta o no existe, descarga solo los APKs necesarios y vuelve a comprobar duplicados tras extraer metadatos del archivo.
+
+Los APKs conservados se guardan en una ruta gestionada:
+
+```text
+${APK_STORAGE_DIR}/{id_app}/{version}/
+```
+
+Por defecto:
+
+```text
+/app/artifacts/apks/{id_app}/{version}/
+```
+
+Los APKs subidos desde Android o `curl` se guardan primero en `${APK_UPLOAD_STAGING_DIR}` y después se mueven a `APK_STORAGE_DIR` si se registra una versión nueva. Si tras extraer metadatos se detecta que la versión ya existía, se elimina el temporal y se reutiliza la versión registrada.
+
+### Registrar un APK local del servidor
+
+Primero copia el archivo a la carpeta permitida:
+
+```bash
+cp example.apk backend/artifacts/manual_uploads/
+```
+
+Después llama al endpoint con la ruta del contenedor:
+
+```bash
+curl -k -X POST "https://localhost:8443/api/apps/register-local-apk" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "apk_path": "/app/artifacts/manual_uploads/example.apk",
+    "title": "Example Health",
+    "developer": "Unknown",
+    "category": "Health & Fitness",
+    "run_mobsf": false,
+    "version_date": "2025-06-01"
+  }'
+```
+
+Por seguridad, `register-local-apk` solo acepta rutas dentro de `MANUAL_APK_UPLOAD_DIR`.
+
+### Subir un APK por multipart
+
+```bash
+curl -k -X POST "https://localhost:8443/api/apps/upload-apk" \
+  -F "file=@example.apk" \
+  -F "title=Example Health" \
+  -F "developer=Unknown" \
+  -F "category=Health & Fitness" \
+  -F "source_label=mobile_upload" \
+  -F "run_mobsf=false"
+```
+
+Este endpoint requiere `python-multipart` y respeta `MAX_UPLOAD_APK_SIZE_MB`. nginx está configurado con `client_max_body_size 300M`; si aumentas el límite de subida, revisa también nginx.
+
+### Subida desde Android
+
+La app Android incluye una opción básica `Subir APK` en la sección de aplicaciones registradas. Usa el selector de archivos del sistema, sube el archivo por multipart a `/api/apps/upload-apk` y refresca `/api/apps/registered` al finalizar. Si cambias la URL pública del backend, mantén actualizado el `BASE_URL` centralizado en `PiCheckApiClient.kt`.

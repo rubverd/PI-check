@@ -186,3 +186,58 @@ No subas:
 * reports y temporales de `backend/artifacts`.
 
 `.gitignore` cubre estos casos, pero revisa siempre `git status` antes de hacer commit.
+
+## Flujo optimizado de comparación
+
+Cuando se solicita una comparación, el backend comprueba cada app seleccionada antes de descargar:
+
+1. Si se envía una versión concreta y ya está registrada, se evita descargar APK.
+2. Si una versión no existe o no es concreta, se descarga solo ese APK.
+3. Si faltan las dos versiones, se descargan ambas en paralelo.
+4. Tras descargar, se extraen metadatos y se vuelve a comprobar si la versión ya existía.
+5. Si ya existía, no se duplica y se elimina el temporal descargado/subido.
+6. Si es nueva, se guarda en `APK_STORAGE_DIR` y se registra `AppVersion`.
+
+La respuesta de `/api/comparisons/request` incluye mensajes con prefijos como `[VERSION_CHECK]`, `[APK]`, `[METADATA]`, `[DEDUP]`, `[DB]` y `[MOBSF]` para explicar qué ha ocurrido.
+
+## Variables de almacenamiento y límites
+
+Valores recomendados en `.env` para esta VM:
+
+```env
+APK_TMP_DIR=/app/artifacts/tmp/apks
+APK_UPLOAD_STAGING_DIR=/app/artifacts/tmp/uploads
+APK_STORAGE_DIR=/app/artifacts/apks
+MANUAL_APK_UPLOAD_DIR=/app/artifacts/manual_uploads
+MAX_APK_SIZE_MB=300
+MAX_UPLOAD_APK_SIZE_MB=300
+```
+
+`register-local-apk` restringe rutas a `MANUAL_APK_UPLOAD_DIR` para evitar path traversal o rutas peligrosas. No aceptes rutas como `/etc/passwd` o directorios fuera de `/app/artifacts/manual_uploads`.
+
+## Subir APK por multipart
+
+Ejemplo desde la VM:
+
+```bash
+curl -k -X POST "https://localhost:8443/api/apps/upload-apk" \
+  -F "file=@example.apk" \
+  -F "title=Example Health" \
+  -F "developer=Unknown" \
+  -F "category=Health & Fitness" \
+  -F "source_label=mobile_upload" \
+  -F "run_mobsf=false"
+```
+
+El endpoint guarda el archivo en staging, extrae metadatos, comprueba duplicados, mueve el APK a almacenamiento gestionado si es una versión nueva y devuelve una respuesta compatible con `register-local-apk`.
+
+## Subir APK desde Android
+
+En la app Android, la sección de aplicaciones registradas incluye `Subir APK`:
+
+1. Pulsa `Seleccionar`.
+2. Elige un `.apk`, `.xapk`, `.apks` o `.apkm` con el selector del sistema.
+3. Pulsa `Subir`.
+4. La app muestra estado básico y refresca las aplicaciones registradas al terminar.
+
+No se implementa extracción automática de APKs instalados mediante `PackageManager`; queda como mejora futura.

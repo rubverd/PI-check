@@ -71,6 +71,7 @@ class RegisterLocalApkRequest(BaseModel):
     icon: Optional[str] = None
     run_mobsf: bool = False
     source_label: Optional[str] = None
+    version_date: Optional[str] = None
 
 
 class RegisterLocalApkResponse(BaseModel):
@@ -78,6 +79,7 @@ class RegisterLocalApkResponse(BaseModel):
     version: RegisteredAppVersionItem
     run_mobsf: bool
     mobsf_report_available: bool = False
+    already_registered: bool = False
     messages: list[str]
 
 
