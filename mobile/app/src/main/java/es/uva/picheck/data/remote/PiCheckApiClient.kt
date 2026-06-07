@@ -8,8 +8,6 @@ import es.uva.picheck.data.model.PlayStoreApp
 import es.uva.picheck.data.model.RegisteredAppVersion
 import es.uva.picheck.data.model.PiCheckVersionAppInfo
 import es.uva.picheck.data.model.PiCheckVersionReport
-import es.uva.picheck.data.model.VersionAppInfo
-import es.uva.picheck.data.model.VersionReportInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -123,10 +121,10 @@ object PiCheckApiClient {
     )
 
     private fun JSONObject.toAnalyzedApp(): AnalyzedApp {
-        val versions = optJSONArray("versions")?.let { array ->
-            List(array.length()) { index -> array.getJSONObject(index).toRegisteredAppVersion() }
-        }.orEmpty()
-        val latestVersion = versions.firstOrNull()
+        val versions: List<RegisteredAppVersion> = parseRegisteredAppVersions(
+            optJSONArray("versions")
+        )
+        val latestVersion: RegisteredAppVersion? = versions.firstOrNull()
         val integrationModel = parseIntegrationModel(
             optString("integration_model", latestVersion?.integrationModel?.name ?: "unknown")
         )
@@ -149,33 +147,28 @@ object PiCheckApiClient {
         )
     }
 
-    private fun JSONObject.toRegisteredAppVersion(): RegisteredAppVersion {
-        val integrationModel = parseIntegrationModel(optString("integration_model"))
-        return RegisteredAppVersion(
-            version = getString("version"),
-            versionCode = optNullableInt("version_code"),
-            versionDate = optNullableString("version_date"),
-            integrationModel = integrationModel,
-            integrationModelShort = optString("integration_model_short", integrationModel.shortLabel()),
-            mobsfStatus = optNullableString("mobsf_status"),
-            mobsfReportAvailable = optBoolean("mobsf_report_available", false),
-            apkSha256 = optNullableString("apk_sha256"),
-            rutaApk = optNullableString("ruta_apk"),
-        )
+    private fun parseRegisteredAppVersions(array: JSONArray?): List<RegisteredAppVersion> {
+        if (array == null) {
+            return emptyList()
+        }
+
+        return List(array.length()) { index: Int ->
+            parseRegisteredAppVersion(array.getJSONObject(index))
+        }
     }
 
-    private fun JSONObject.toRegisteredAppVersion(): RegisteredAppVersion {
-        val integrationModel = parseIntegrationModel(optString("integration_model"))
+    private fun parseRegisteredAppVersion(json: JSONObject): RegisteredAppVersion {
+        val integrationModel = parseIntegrationModel(json.optString("integration_model"))
         return RegisteredAppVersion(
-            version = getString("version"),
-            versionCode = optNullableInt("version_code"),
-            versionDate = optNullableString("version_date"),
+            version = json.getString("version"),
+            versionCode = json.optNullableInt("version_code"),
+            versionDate = json.optNullableString("version_date"),
             integrationModel = integrationModel,
-            integrationModelShort = optString("integration_model_short", integrationModel.shortLabel()),
-            mobsfStatus = optNullableString("mobsf_status"),
-            mobsfReportAvailable = optBoolean("mobsf_report_available", false),
-            apkSha256 = optNullableString("apk_sha256"),
-            rutaApk = optNullableString("ruta_apk"),
+            integrationModelShort = json.optString("integration_model_short", integrationModel.shortLabel()),
+            mobsfStatus = json.optNullableString("mobsf_status"),
+            mobsfReportAvailable = json.optBoolean("mobsf_report_available", false),
+            apkSha256 = json.optNullableString("apk_sha256"),
+            rutaApk = json.optNullableString("ruta_apk"),
         )
     }
 
