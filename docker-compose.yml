@@ -24,14 +24,20 @@ services:
       MOBSF_URL: ${MOBSF_URL}
       MOBSF_API_KEY: ${MOBSF_API_KEY}
       APK_TMP_DIR: ${APK_TMP_DIR}
+      APK_UPLOAD_STAGING_DIR: ${APK_UPLOAD_STAGING_DIR}
+      APK_STORAGE_DIR: ${APK_STORAGE_DIR}
       MOBSF_REPORTS_DIR: ${MOBSF_REPORTS_DIR}
       MASTG_REPORTS_DIR: ${MASTG_REPORTS_DIR}
       COMPARISON_REPORTS_DIR: ${COMPARISON_REPORTS_DIR}
       KEEP_APKS_AFTER_ANALYSIS: ${KEEP_APKS_AFTER_ANALYSIS}
+      MAX_APK_SIZE_MB: ${MAX_APK_SIZE_MB}
+      MAX_UPLOAD_APK_SIZE_MB: ${MAX_UPLOAD_APK_SIZE_MB}
+      MANUAL_APK_UPLOAD_DIR: ${MANUAL_APK_UPLOAD_DIR}
     ports:
       - "127.0.0.1:${PICHECK_API_PORT}:8088"
     volumes:
       - ./backend/artifacts:/app/artifacts
+      - ./scripts:/app/scripts:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -72,6 +72,36 @@ class AppVersionRepository:
 
         return self._to_domain(model)
 
+    def find_success_with_mobsf_by_apk_sha256(
+        self,
+        apk_sha256: str,
+        exclude_id_app: str | None = None,
+        exclude_version: str | None = None,
+    ) -> AppVersion | None:
+        stmt = (
+            select(AppVersionModel)
+            .where(AppVersionModel.apk_sha256 == apk_sha256)
+            .where(AppVersionModel.estado_mobsf == MobSFAnalysisStatus.SUCCESS.value)
+            .where(AppVersionModel.ruta_informe_mobsf.is_not(None))
+            .where(AppVersionModel.hash_mobsf.is_not(None))
+        )
+
+        if exclude_id_app is not None and exclude_version is not None:
+            stmt = stmt.where(
+                ~(
+                    (AppVersionModel.id_app == exclude_id_app)
+                    & (AppVersionModel.version == exclude_version)
+                )
+            )
+
+        stmt = stmt.limit(1)
+        model = self.db.execute(stmt).scalars().first()
+
+        if model is None:
+            return None
+
+        return self._to_domain(model)
+
     def find_latest_with_mobsf_report(self, id_app: str) -> AppVersion | None:
         stmt = (
             select(AppVersionModel)
@@ -113,6 +143,7 @@ class AppVersionRepository:
         existing.ruta_informe_mobsf = app_version.ruta_informe_mobsf
         existing.hash_mobsf = app_version.hash_mobsf
         existing.apk_sha256 = app_version.apk_sha256
+        existing.ruta_apk = app_version.ruta_apk
         existing.estado_mobsf = app_version.estado_mobsf.value
 
         self.db.flush()
@@ -153,6 +184,7 @@ class AppVersionRepository:
             ruta_informe_mobsf=model.ruta_informe_mobsf,
             hash_mobsf=model.hash_mobsf,
             apk_sha256=model.apk_sha256,
+            ruta_apk=model.ruta_apk,
             estado_mobsf=MobSFAnalysisStatus(model.estado_mobsf),
         )
 
@@ -167,5 +199,6 @@ class AppVersionRepository:
             ruta_informe_mobsf=app_version.ruta_informe_mobsf,
             hash_mobsf=app_version.hash_mobsf,
             apk_sha256=app_version.apk_sha256,
+            ruta_apk=app_version.ruta_apk,
             estado_mobsf=app_version.estado_mobsf.value,
         )
