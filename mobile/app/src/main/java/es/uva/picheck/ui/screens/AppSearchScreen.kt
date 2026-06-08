@@ -5,6 +5,9 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -86,6 +89,12 @@ private enum class AppListMode {
     UPLOAD
 }
 
+private enum class MainScreenState {
+    SELECTION,
+    PROGRESS,
+    RESULT
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppSearchScreen() {
@@ -124,6 +133,15 @@ fun AppSearchScreen() {
             selectedUploadUri = uri
             selectedUploadName = displayName
             uploadStatus = "Archivo seleccionado: $displayName"
+        }
+    }
+
+    fun selectMode(selectedMode: AppListMode) {
+        currentMode = selectedMode
+        statusMessage = when (selectedMode) {
+            AppListMode.REGISTERED -> "Mostrando aplicaciones registradas en el servidor."
+            AppListMode.SEARCH -> "Busca aplicaciones para añadirlas a la comparación."
+            AppListMode.UPLOAD -> "Importa APKs al servidor; después aparecerán en Registradas."
         }
     }
 
@@ -193,55 +211,74 @@ fun AppSearchScreen() {
         }
     }
     
-    if (comparisonResult != null) {
-        ComparisonResultScreen(
-            result = comparisonResult!!,
-            onNewComparison = {
-                comparisonResult = null
-                query = ""
-                apps = emptyList()
-                selectedApps = emptyList()
-                currentMode = AppListMode.REGISTERED
-                isLoadingSearch = false
-                showDownloadProgress = false
-                statusMessage = "Selecciona dos aplicaciones para preparar su comparación."
-            },
-        )
-
-        return
+    val mainScreenState = when {
+        comparisonResult != null -> MainScreenState.RESULT
+        showDownloadProgress && selectedApps.size == 2 -> MainScreenState.PROGRESS
+        else -> MainScreenState.SELECTION
     }
 
-    if (showDownloadProgress && selectedApps.size == 2) {
-        AppDownloadProgressScreen(
-            appA = selectedApps[0],
-            appB = selectedApps[1],
-            onFinished = { result ->
-                comparisonResult = result
-                showDownloadProgress = false
-            },
-            onBack = {
-                showDownloadProgress = false
-                statusMessage = "Selecciona dos aplicaciones para preparar su comparación."
-            },
-        )
-
-        return
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "PI-check",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
+    Crossfade(
+        targetState = mainScreenState,
+        animationSpec = tween(durationMillis = 240),
+        label = "main-screen-transition",
+    ) { activeScreen ->
+        when (activeScreen) {
+            MainScreenState.RESULT -> {
+                comparisonResult?.let { result ->
+                    ComparisonResultScreen(
+                        result = result,
+                        onNewComparison = {
+                            comparisonResult = null
+                            query = ""
+                            apps = emptyList()
+                            selectedApps = emptyList()
+                            currentMode = AppListMode.REGISTERED
+                            isLoadingSearch = false
+                            showDownloadProgress = false
+                            statusMessage = "Selecciona dos aplicaciones para preparar su comparación."
+                        },
                     )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = PiCheckBurgundy,
-                ),
-            )
+                }
+            }
+
+            MainScreenState.PROGRESS -> {
+                if (selectedApps.size == 2) {
+                    AppDownloadProgressScreen(
+                        appA = selectedApps[0],
+                        appB = selectedApps[1],
+                        onFinished = { result ->
+                            comparisonResult = result
+                            showDownloadProgress = false
+                        },
+                        onBack = {
+                            showDownloadProgress = false
+                            statusMessage = "Selecciona dos aplicaciones para preparar su comparación."
+                        },
+                    )
+                }
+            }
+
+            MainScreenState.SELECTION -> {
+                Scaffold(
+        topBar = {
+            Column {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = "PI-check",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = PiCheckBurgundy,
+                    ),
+                )
+                AppModeSelector(
+                    currentMode = currentMode,
+                    onModeSelected = ::selectMode,
+                )
+            }
         },
         containerColor = PiCheckBackground,
     ) { innerPadding ->
@@ -293,26 +330,17 @@ fun AppSearchScreen() {
                 Spacer(modifier = Modifier.height(10.dp))
             }
 
-            AppModeSelector(
-                currentMode = currentMode,
-                onModeSelected = { selectedMode ->
-                    currentMode = selectedMode
-
-                    statusMessage = when (selectedMode) {
-                        AppListMode.REGISTERED -> "Mostrando aplicaciones registradas en el servidor."
-                        AppListMode.SEARCH -> "Busca aplicaciones para añadirlas a la comparación."
-                        AppListMode.UPLOAD -> "Importa APKs al servidor; después aparecerán en Registradas."
-                    }
-                }
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            LazyColumn(
+            Crossfade(
+                targetState = currentMode,
+                animationSpec = tween(durationMillis = 220),
+                label = "section-transition",
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                when (currentMode) {
+            ) { activeMode ->
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    when (activeMode) {
                     AppListMode.REGISTERED -> {
                         item {
                             SectionTitle(text = "Aplicaciones registradas")
@@ -469,8 +497,12 @@ fun AppSearchScreen() {
                     }
                 }
             }
+                    }
+                }
+            }
         }
     }
+}
 }
 
 @Composable
@@ -553,8 +585,16 @@ private fun ModeSelectorSegment(
         )
     }
 
-    val backgroundColor = if (isSelected) selectedColor else PiCheckBackground
-    val textColor = if (isSelected) Color.White else PiCheckDarkText
+    val backgroundColor by animateColorAsState(
+        targetValue = if (isSelected) selectedColor else PiCheckBackground,
+        animationSpec = tween(durationMillis = 180),
+        label = "tab-background",
+    )
+    val textColor by animateColorAsState(
+        targetValue = if (isSelected) Color.White else PiCheckDarkText,
+        animationSpec = tween(durationMillis = 180),
+        label = "tab-text",
+    )
 
     Box(
         modifier = modifier
@@ -1260,8 +1300,12 @@ private fun IntegrationModel.shortLabel(): String = when (this) {
     IntegrationModel.UNKNOWN -> "?"
 }
 
-private fun RegisteredAppVersion.analysisLabel(): String =
-    if (mobsfReportAvailable) "Analizada: Sí" else "Analizada: No"
+private fun RegisteredAppVersion.analysisLabel(): String = when (mobsfStatus?.lowercase()) {
+    "success" -> if (mobsfReportAvailable) "Analizada: Sí" else "Analizada: No"
+    "pending" -> "Análisis: En progreso"
+    "error" -> "Error en análisis"
+    else -> "Analizada: No"
+}
 
 private fun RegisteredAppVersion.versionDateLabel(): String =
     versionDate?.takeIf { it.isNotBlank() } ?: "Fecha desconocida"

@@ -89,8 +89,6 @@ def register_local_apk(
     )
 
     registration_service = AppRegistrationService(db)
-    analysis_service = AppAnalysisService(db)
-
     try:
         prepared = registration_service.register_local_apk(
             apk_path=request.apk_path,
@@ -101,19 +99,28 @@ def register_local_apk(
             source_label=request.source_label,
             version_date=request.version_date,
         )
+        db.commit()
+        logger.info(
+            "[DB] Commit de registro completado antes de MobSF app_id=%s version=%s",
+            prepared.app_version.id_app,
+            prepared.app_version.version,
+        )
         messages, mobsf_report_available = _maybe_run_mobsf(
             prepared=prepared,
-            analysis_service=analysis_service,
             run_mobsf=request.run_mobsf,
+            db=db,
         )
-
-        db.commit()
         return _local_apk_response(
             prepared=prepared,
             run_mobsf=request.run_mobsf,
             mobsf_report_available=mobsf_report_available,
             messages=messages,
         )
+
+    except (AppRegistrationError, AppAnalysisError) as exc:
+        db.rollback()
+        logger.exception("Error controlado registrando APK local")
+        raise HTTPException(status_code=422, detail=str(exc))
 
     except (AppRegistrationError, AppAnalysisError) as exc:
         db.rollback()
@@ -149,7 +156,6 @@ def upload_apk(
     )
 
     registration_service = AppRegistrationService(db)
-    analysis_service = AppAnalysisService(db)
     staging_path: Path | None = None
 
     try:
@@ -163,13 +169,17 @@ def upload_apk(
             source_label=source_label,
             version_date=version_date,
         )
+        db.commit()
+        logger.info(
+            "[DB] Commit de registro completado antes de MobSF app_id=%s version=%s",
+            prepared.app_version.id_app,
+            prepared.app_version.version,
+        )
         messages, mobsf_report_available = _maybe_run_mobsf(
             prepared=prepared,
-            analysis_service=analysis_service,
             run_mobsf=run_mobsf,
+            db=db,
         )
-
-        db.commit()
         return _local_apk_response(
             prepared=prepared,
             run_mobsf=run_mobsf,
@@ -256,8 +266,8 @@ def get_analyzed_apps(db: Session = Depends(get_db_session)):
 
 def _maybe_run_mobsf(
     prepared,
-    analysis_service: AppAnalysisService,
     run_mobsf: bool,
+    db: Session,
 ) -> tuple[list[str], bool]:
     messages = list(prepared.messages)
     mobsf_report_available = _has_mobsf_report_domain(prepared.app_version)
@@ -268,7 +278,8 @@ def _maybe_run_mobsf(
             prepared.app_version.id_app,
             prepared.app_version.version,
         )
-        report, analysis_messages = analysis_service.ensure_mobsf_report(prepared)
+        analysis_service = AppAnalysisService(db)
+        report, analysis_messages = analysis_service.ensure_mobsf_reports([prepared])[0]
         messages.extend(analysis_messages)
         prepared.app_version = report.version_app
         mobsf_report_available = report.mobsf_report is not None

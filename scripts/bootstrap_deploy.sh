@@ -224,6 +224,8 @@ if [[ "$SKIP_ENV" != "true" ]]; then
     set_env_value "$ENV_FILE" "APK_STORAGE_DIR" "/app/artifacts/apks"
     set_env_value "$ENV_FILE" "APK_UPLOAD_STAGING_DIR" "/app/artifacts/tmp/uploads"
     set_env_value "$ENV_FILE" "MAX_UPLOAD_APK_SIZE_MB" "$MAX_UPLOAD_APK_SIZE_MB"
+    set_env_value "$ENV_FILE" "MOBSF_ANALYSIS_MODE" "${MOBSF_ANALYSIS_MODE:-sync}"
+    set_env_value "$ENV_FILE" "MOBSF_MAX_PARALLEL_ANALYSES" "${MOBSF_MAX_PARALLEL_ANALYSES:-2}"
   fi
 else
   echo "[ENV] Skipping .env creation/update because --skip-env/SKIP_ENV=true was provided"

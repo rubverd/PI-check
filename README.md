@@ -237,3 +237,45 @@ Registradas | Buscar | Subir APK
 - `Subir APK`: se centra solo en importar APKs al servidor y refresca `Registradas` al finalizar.
 
 La extracción de APKs instaladas queda documentada como mejora experimental: en Android 11+ puede requerir declarar visibilidad de paquetes (`<queries>` o `QUERY_ALL_PACKAGES`), y muchas apps instaladas desde bundles usan split APKs, por lo que no basta con subir siempre el APK base.
+
+### Transacciones cortas y análisis MobSF paralelo
+
+La comparación separa dos fases para evitar conexiones `idle in transaction` durante análisis largos:
+
+1. Fase de registro: descarga/ingesta, extracción de metadatos, registro de `Application`/`AppVersion`, almacenamiento gestionado y `commit()` inmediato.
+2. Fase MobSF: cada análisis marca `PENDING`, hace `commit()`, ejecuta MobSF sin una transacción abierta y al finalizar guarda `SUCCESS`/`ERROR` con otro `commit()`.
+
+Con esto, una versión nueva aparece en `/api/apps/registered` antes de que termine MobSF y la app Android puede mostrar `Analizada: No`, `Análisis: En progreso`, `Analizada: Sí` o `Error en análisis` según `estado_mobsf`.
+
+Configuración disponible:
+
+```env
+MOBSF_ANALYSIS_MODE=sync
+MOBSF_MAX_PARALLEL_ANALYSES=2
+```
+
+`sync` mantiene el análisis secuencial. `parallel` lanza análisis en paralelo con sesiones SQLAlchemy independientes y límite `MOBSF_MAX_PARALLEL_ANALYSES`. Para la VM UVA se recomienda empezar con:
+
+```env
+MOBSF_ANALYSIS_MODE=parallel
+MOBSF_MAX_PARALLEL_ANALYSES=2
+```
+
+Aunque la VM tenga 16 cores y 32 GB RAM, MobSF/JADX/SAST/apktool son los componentes pesados; subir demasiado la concurrencia puede empeorar tiempos por CPU/I/O.
+
+Para verificar que no quedan transacciones largas mientras MobSF analiza:
+
+```sql
+SELECT
+    pid,
+    usename,
+    state,
+    now() - xact_start AS transaction_age,
+    now() - query_start AS query_age,
+    wait_event_type,
+    wait_event,
+    LEFT(query, 300) AS query
+FROM pg_stat_activity
+WHERE datname = current_database()
+ORDER BY xact_start NULLS LAST;
+```

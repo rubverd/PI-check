@@ -289,3 +289,46 @@ Registradas | Buscar | Subir APK
 `Registradas` y `Buscar` mantienen visibles los dos huecos de comparación. `Subir APK` se centra en importar un archivo seleccionado con Storage Access Framework; después de una subida correcta se refresca la lista de registradas.
 
 La extracción de APKs instaladas se mantiene como funcionalidad experimental/documentada. En Android 11+ hay restricciones de visibilidad de paquetes, y las apps instaladas como App Bundle pueden tener `splitSourceDirs`; si no se empaquetan base + splits de forma explícita, no debe ignorarse ese caso silenciosamente.
+
+## Transacciones cortas y MobSF paralelo
+
+El backend confirma el registro de aplicaciones/versiones antes de lanzar MobSF. Durante análisis largos no debe quedar una transacción abierta del backend esperando en PostgreSQL; la versión debe aparecer en `/api/apps/registered` como no analizada o en progreso mientras MobSF continúa.
+
+Variables recomendadas para la VM UVA:
+
+```env
+MOBSF_ANALYSIS_MODE=parallel
+MOBSF_MAX_PARALLEL_ANALYSES=2
+```
+
+`2` es un valor razonable para empezar con 16 cores y 32 GB RAM. MobSF puede consumir muchos recursos en JADX/SAST/apktool, así que aumentar la concurrencia puede empeorar tiempos por CPU o I/O.
+
+Consulta para comprobar transacciones durante un análisis:
+
+```sql
+SELECT
+    pid,
+    usename,
+    state,
+    now() - xact_start AS transaction_age,
+    now() - query_start AS query_age,
+    wait_event_type,
+    wait_event,
+    LEFT(query, 300) AS query
+FROM pg_stat_activity
+WHERE datname = current_database()
+ORDER BY xact_start NULLS LAST;
+```
+
+Mientras MobSF analiza no debería aparecer una conexión del backend con muchos minutos en `idle in transaction`.
+
+## Cabecera Android y estados de análisis
+
+La app Android muestra una cabecera fija con `PI-check` y navegación horizontal `Registradas | Buscar | Subir APK`. `Registradas` es la sección por defecto; `Registradas` y `Buscar` mantienen los huecos de comparación, y `Subir APK` se centra solo en importar APKs. Las transiciones entre secciones usan animación suave.
+
+Estados mostrados por versión:
+
+- `SUCCESS` con informe disponible: `Analizada: Sí`.
+- `PENDING`: `Análisis: En progreso`.
+- `NOT_ANALYZED`: `Analizada: No`.
+- `ERROR`: `Error en análisis`.
