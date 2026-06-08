@@ -35,8 +35,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import es.uva.picheck.data.model.ComparisonAnalysisResult
-import es.uva.picheck.data.model.VersionReportInfo
+import es.uva.picheck.data.model.PiCheckComparisonAnalysis
+import es.uva.picheck.data.model.PiCheckVersionReport
 import es.uva.picheck.ui.theme.PiCheckBackground
 import es.uva.picheck.ui.theme.PiCheckBlue
 import es.uva.picheck.ui.theme.PiCheckBurgundy
@@ -46,7 +46,7 @@ import es.uva.picheck.ui.theme.PiCheckDarkText
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ComparisonResultScreen(
-    result: ComparisonAnalysisResult,
+    result: PiCheckComparisonAnalysis,
     onNewComparison: () -> Unit,
 ) {
     var showFullJson by remember { mutableStateOf(false) }
@@ -129,7 +129,7 @@ fun ComparisonResultScreen(
 }
 
 @Composable
-private fun SummaryCard(result: ComparisonAnalysisResult) {
+private fun SummaryCard(result: PiCheckComparisonAnalysis) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
@@ -162,7 +162,7 @@ private fun SummaryCard(result: ComparisonAnalysisResult) {
 @Composable
 private fun VersionReportCard(
     title: String,
-    report: VersionReportInfo,
+    report: PiCheckVersionReport,
 ) {
     val versionApp = report.versionApp
     val mobsfReport = report.mobsfReport

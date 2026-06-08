@@ -1,12 +1,18 @@
+import logging
 from dataclasses import dataclass
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
 from app.application.services.app_analysis_service import AppAnalysisService
-from app.application.services.app_registration_service import AppRegistrationService
+from app.application.services.app_registration_service import (
+    AppRegistrationService,
+    _selected_app_key,
+)
 from app.domain.entities.comparison_result import ComparisonResult
 from app.schemas.comparisons import ComparisonRequest
+
+logger = logging.getLogger("pi-check")
 
 
 @dataclass
@@ -30,6 +36,15 @@ class ComparisonService:
     ) -> ComparisonExecutionResult:
         comparison_id = str(uuid4())
 
+        logger.info(
+            "[COMPARISON] Solicitud recibida comparison_id=%s app_a=%s version_a=%s app_b=%s version_b=%s",
+            comparison_id,
+            request.app_a.app_id,
+            request.app_a.selected_version or request.app_a.version,
+            request.app_b.app_id,
+            request.app_b.selected_version or request.app_b.version,
+        )
+
         messages: list[str] = [
             f"[COMPARISON] Solicitud creada con identificador {comparison_id}.",
             f"[COMPARISON] Aplicación A seleccionada: {request.app_a.title}.",
@@ -46,19 +61,31 @@ class ComparisonService:
 
         messages.extend(registration_messages)
 
-        prepared_a = prepared_by_app_id[request.app_a.app_id]
-        prepared_b = prepared_by_app_id[request.app_b.app_id]
+        prepared_a = prepared_by_app_id[_selected_app_key(request.app_a)]
+        prepared_b = prepared_by_app_id[_selected_app_key(request.app_b)]
 
-        report_a, messages_a = self.app_analysis_service.ensure_mobsf_report(
-            prepared_app=prepared_a,
+        self.db.commit()
+        messages.append(
+            "[DB] Commit de registro completado antes de MobSF "
+            f"app_a={prepared_a.app_version.id_app}:{prepared_a.app_version.version} "
+            f"app_b={prepared_b.app_version.id_app}:{prepared_b.app_version.version}."
         )
+        logger.info(
+            "[DB] Commit de registro completado antes de MobSF app_a=%s:%s app_b=%s:%s",
+            prepared_a.app_version.id_app,
+            prepared_a.app_version.version,
+            prepared_b.app_version.id_app,
+            prepared_b.app_version.version,
+        )
+
+        analysis_results = self.app_analysis_service.ensure_mobsf_reports(
+            [prepared_a, prepared_b]
+        )
+
+        report_a, messages_a = analysis_results[0]
+        report_b, messages_b = analysis_results[1]
 
         messages.extend(messages_a)
-
-        report_b, messages_b = self.app_analysis_service.ensure_mobsf_report(
-            prepared_app=prepared_b,
-        )
-
         messages.extend(messages_b)
 
         comparison = ComparisonResult(
