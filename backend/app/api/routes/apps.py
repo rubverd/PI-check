@@ -122,6 +122,11 @@ def register_local_apk(
         logger.exception("Error controlado registrando APK local")
         raise HTTPException(status_code=422, detail=str(exc))
 
+    except (AppRegistrationError, AppAnalysisError) as exc:
+        db.rollback()
+        logger.exception("Error controlado registrando APK local")
+        raise HTTPException(status_code=422, detail=str(exc))
+
     except Exception as exc:
         db.rollback()
         logger.exception("Error inesperado registrando APK local")
