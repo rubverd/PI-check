@@ -7,12 +7,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -35,13 +40,13 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -77,11 +82,6 @@ import kotlinx.coroutines.launch
 
 private val ElectricBlue = Color(0xFF2D5BFF)
 
-private enum class SegmentPosition {
-    START,
-    CENTER,
-    END
-}
 
 private enum class AppListMode {
     REGISTERED,
@@ -165,7 +165,7 @@ fun AppSearchScreen() {
     }
 
     suspend fun refreshRegisteredApps(
-    showLoadingIndicator: Boolean = true,
+        showLoadingIndicator: Boolean = true,
     ) {
         if (!showLoadingIndicator && isLoadingAnalyzed) {
             return
@@ -210,7 +210,7 @@ fun AppSearchScreen() {
             }
         }
     }
-    
+
     val mainScreenState = when {
         comparisonResult != null -> MainScreenState.RESULT
         showDownloadProgress && selectedApps.size == 2 -> MainScreenState.PROGRESS
@@ -260,354 +260,372 @@ fun AppSearchScreen() {
 
             MainScreenState.SELECTION -> {
                 Scaffold(
-        topBar = {
-            Column {
-                TopAppBar(
-                    title = {
-                        Text(
-                            text = "PI-check",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
+                    topBar = {
+                        PiCheckHeader(
+                            currentMode = currentMode,
+                            onModeSelected = ::selectMode,
                         )
                     },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = PiCheckBurgundy,
-                    ),
-                )
-                AppModeSelector(
-                    currentMode = currentMode,
-                    onModeSelected = ::selectMode,
-                )
-            }
-        },
-        containerColor = PiCheckBackground,
-    ) { innerPadding ->
+                    containerColor = PiCheckBackground,
+                ) { innerPadding ->
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 14.dp, vertical = 12.dp)
-        ) {
-            if (currentMode != AppListMode.UPLOAD) {
-                SelectedAppsPanel(
-                    selectedApps = selectedApps,
-                    onRemove = { appToRemove ->
-                        selectedApps = selectedApps.filterNot { it.selectionKey() == appToRemove.selectionKey() }
-                        statusMessage = "Aplicación eliminada de la selección."
-                    },
-                )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .padding(horizontal = 14.dp, vertical = 12.dp)
+                    ) {
+                        if (currentMode != AppListMode.UPLOAD) {
+                            SelectedAppsPanel(
+                                selectedApps = selectedApps,
+                                onRemove = { appToRemove ->
+                                    selectedApps = selectedApps.filterNot { it.selectionKey() == appToRemove.selectionKey() }
+                                    statusMessage = "Aplicación eliminada de la selección."
+                                },
+                            )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
 
-                Button(
-                    onClick = {
-                        if (selectedApps.size == 2) {
-                            showDownloadProgress = true
-                        }
-                    },
-                    enabled = selectedApps.size == 2 && !isLoadingSearch,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = PiCheckBlue,
-                        contentColor = Color.White,
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Comparar aplicaciones")
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = statusMessage,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = PiCheckDarkText,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-            }
-
-            Crossfade(
-                targetState = currentMode,
-                animationSpec = tween(durationMillis = 220),
-                label = "section-transition",
-                modifier = Modifier.weight(1f),
-            ) { activeMode ->
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    when (activeMode) {
-                    AppListMode.REGISTERED -> {
-                        item {
-                            SectionTitle(text = "Aplicaciones registradas")
-                        }
-
-
-                        if (isLoadingAnalyzed) {
-                            item {
-                                LoadingCard(message = "Cargando aplicaciones registradas...")
+                            Button(
+                                onClick = {
+                                    if (selectedApps.size == 2) {
+                                        showDownloadProgress = true
+                                    }
+                                },
+                                enabled = selectedApps.size == 2 && !isLoadingSearch,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = PiCheckBlue,
+                                    contentColor = Color.White,
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("Comparar aplicaciones")
                             }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = statusMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = PiCheckDarkText,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
                         }
 
-                        if (!isLoadingAnalyzed && analyzedApps.isEmpty()) {
-                            item {
-                                EmptyAnalyzedAppsCard(message = analyzedStatus)
-                            }
-                        }
+                        Crossfade(
+                            targetState = currentMode,
+                            animationSpec = tween(durationMillis = 220),
+                            label = "section-transition",
+                            modifier = Modifier.weight(1f),
+                        ) { activeMode ->
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                when (activeMode) {
+                                    AppListMode.REGISTERED -> {
+                                        item {
+                                            SectionTitle(text = "Aplicaciones registradas")
+                                        }
 
-                        if (!isLoadingAnalyzed && analyzedApps.isNotEmpty()) {
-                            items(analyzedApps, key = { it.appId }) { analyzedApp ->
-                                AnalyzedAppCard(
-                                    app = analyzedApp,
-                                    selectedKeys = selectedApps.map { it.selectionKey() }.toSet(),
-                                    onVersionSelected = { version ->
-                                        toggleSelectedApp(analyzedApp.toPlayStoreApp(version))
-                                    },
-                                )
-                            }
-                        }
-                    }
 
-                    AppListMode.SEARCH -> {
-                        item {
-                            SectionTitle(text = "Buscar aplicaciones")
-                        }
+                                        if (isLoadingAnalyzed) {
+                                            item {
+                                                LoadingCard(message = "Cargando aplicaciones registradas...")
+                                            }
+                                        }
 
-                        item {
-                            SearchInputRow(
-                                query = query,
-                                onQueryChange = { query = it },
-                                isLoading = isLoadingSearch,
-                                onSearch = {
-                                    coroutineScope.launch {
-                                        isLoadingSearch = true
-                                        statusMessage = "Buscando aplicaciones..."
+                                        if (!isLoadingAnalyzed && analyzedApps.isEmpty()) {
+                                            item {
+                                                EmptyAnalyzedAppsCard(message = analyzedStatus)
+                                            }
+                                        }
 
-                                        try {
-                                            apps = PiCheckApiClient.searchApps(query)
-                                            statusMessage = "Resultados encontrados: ${apps.size}"
-                                        } catch (exception: Exception) {
-                                            statusMessage = "Error buscando aplicaciones: ${exception.message}"
-                                        } finally {
-                                            isLoadingSearch = false
+                                        if (!isLoadingAnalyzed && analyzedApps.isNotEmpty()) {
+                                            items(analyzedApps, key = { it.appId }) { analyzedApp ->
+                                                AnalyzedAppCard(
+                                                    app = analyzedApp,
+                                                    selectedKeys = selectedApps.map { it.selectionKey() }.toSet(),
+                                                    onVersionSelected = { version ->
+                                                        toggleSelectedApp(analyzedApp.toPlayStoreApp(version))
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    AppListMode.SEARCH -> {
+                                        item {
+                                            SectionTitle(text = "Buscar aplicaciones")
+                                        }
+
+                                        item {
+                                            SearchInputRow(
+                                                query = query,
+                                                onQueryChange = { query = it },
+                                                isLoading = isLoadingSearch,
+                                                onSearch = {
+                                                    coroutineScope.launch {
+                                                        isLoadingSearch = true
+                                                        statusMessage = "Buscando aplicaciones..."
+
+                                                        try {
+                                                            apps = PiCheckApiClient.searchApps(query)
+                                                            statusMessage = "Resultados encontrados: ${apps.size}"
+                                                        } catch (exception: Exception) {
+                                                            statusMessage = "Error buscando aplicaciones: ${exception.message}"
+                                                        } finally {
+                                                            isLoadingSearch = false
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                        }
+
+                                        if (isLoadingSearch) {
+                                            item {
+                                                LoadingCard(message = "Buscando aplicaciones en Google Play...")
+                                            }
+                                        }
+
+                                        if (!isLoadingSearch && apps.isEmpty()) {
+                                            item {
+                                                EmptySearchCard(
+                                                    message = if (query.length < 2) {
+                                                        "Introduce al menos dos caracteres para buscar aplicaciones."
+                                                    } else {
+                                                        "No hay resultados cargados para la búsqueda actual."
+                                                    }
+                                                )
+                                            }
+                                        }
+
+                                        if (!isLoadingSearch && apps.isNotEmpty()) {
+                                            items(apps, key = { it.appId }) { app ->
+                                                val isSelected = selectedApps.any { it.selectionKey() == app.selectionKey() }
+
+                                                AppResultCard(
+                                                    app = app,
+                                                    isSelected = isSelected,
+                                                    onClick = {
+                                                        toggleSelectedApp(app)
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    AppListMode.UPLOAD -> {
+                                        item {
+                                            SectionTitle(text = "Subir APK")
+                                        }
+
+                                        item {
+                                            UploadApkCard(
+                                                selectedFileName = selectedUploadName,
+                                                status = uploadStatus,
+                                                isUploading = isUploadingApk,
+                                                onPickFile = {
+                                                    uploadLauncher.launch(
+                                                        arrayOf(
+                                                            "application/vnd.android.package-archive",
+                                                            "application/zip",
+                                                            "application/octet-stream",
+                                                            "*/*",
+                                                        )
+                                                    )
+                                                },
+                                                onUpload = {
+                                                    val uri = selectedUploadUri
+                                                    val fileName = selectedUploadName
+
+                                                    if (uri == null || fileName == null) {
+                                                        uploadStatus = "Selecciona primero un archivo APK."
+                                                        return@UploadApkCard
+                                                    }
+
+                                                    coroutineScope.launch {
+                                                        isUploadingApk = true
+                                                        uploadStatus = "Subiendo APK... Registrando versión..."
+
+                                                        try {
+                                                            val result = PiCheckApiClient.uploadApk(
+                                                                context = context,
+                                                                uri = uri,
+                                                                fileName = fileName,
+                                                            )
+                                                            uploadStatus = if (result.contains("ya estaba registrada")) {
+                                                                "La versión ya estaba registrada: $result"
+                                                            } else {
+                                                                "APK registrado correctamente: $result"
+                                                            }
+                                                            selectedUploadUri = null
+                                                            selectedUploadName = null
+                                                            refreshRegisteredApps(showLoadingIndicator = true)
+                                                            currentMode = AppListMode.REGISTERED
+                                                        } catch (exception: Exception) {
+                                                            uploadStatus = "Error al subir APK: ${exception.message}"
+                                                        } finally {
+                                                            isUploadingApk = false
+                                                        }
+                                                    }
+                                                },
+                                            )
+                                        }
+
+                                        item {
+                                            InstalledAppsExperimentalCard()
                                         }
                                     }
                                 }
-                            )
-                        }
-
-                        if (isLoadingSearch) {
-                            item {
-                                LoadingCard(message = "Buscando aplicaciones en Google Play...")
                             }
                         }
-
-                        if (!isLoadingSearch && apps.isEmpty()) {
-                            item {
-                                EmptySearchCard(
-                                    message = if (query.length < 2) {
-                                        "Introduce al menos dos caracteres para buscar aplicaciones."
-                                    } else {
-                                        "No hay resultados cargados para la búsqueda actual."
-                                    }
-                                )
-                            }
-                        }
-
-                        if (!isLoadingSearch && apps.isNotEmpty()) {
-                            items(apps, key = { it.appId }) { app ->
-                                val isSelected = selectedApps.any { it.selectionKey() == app.selectionKey() }
-
-                                AppResultCard(
-                                    app = app,
-                                    isSelected = isSelected,
-                                    onClick = {
-                                        toggleSelectedApp(app)
-                                    },
-                                )
-                            }
-                        }
-                    }
-
-                    AppListMode.UPLOAD -> {
-                        item {
-                            SectionTitle(text = "Subir APK")
-                        }
-
-                        item {
-                            UploadApkCard(
-                                selectedFileName = selectedUploadName,
-                                status = uploadStatus,
-                                isUploading = isUploadingApk,
-                                onPickFile = {
-                                    uploadLauncher.launch(
-                                        arrayOf(
-                                            "application/vnd.android.package-archive",
-                                            "application/zip",
-                                            "application/octet-stream",
-                                            "*/*",
-                                        )
-                                    )
-                                },
-                                onUpload = {
-                                    val uri = selectedUploadUri
-                                    val fileName = selectedUploadName
-
-                                    if (uri == null || fileName == null) {
-                                        uploadStatus = "Selecciona primero un archivo APK."
-                                        return@UploadApkCard
-                                    }
-
-                                    coroutineScope.launch {
-                                        isUploadingApk = true
-                                        uploadStatus = "Subiendo APK... Registrando versión..."
-
-                                        try {
-                                            val result = PiCheckApiClient.uploadApk(
-                                                context = context,
-                                                uri = uri,
-                                                fileName = fileName,
-                                            )
-                                            uploadStatus = if (result.contains("ya estaba registrada")) {
-                                                "La versión ya estaba registrada: $result"
-                                            } else {
-                                                "APK registrado correctamente: $result"
-                                            }
-                                            selectedUploadUri = null
-                                            selectedUploadName = null
-                                            refreshRegisteredApps(showLoadingIndicator = true)
-                                            currentMode = AppListMode.REGISTERED
-                                        } catch (exception: Exception) {
-                                            uploadStatus = "Error al subir APK: ${exception.message}"
-                                        } finally {
-                                            isUploadingApk = false
-                                        }
-                                    }
-                                },
-                            )
-                        }
-
-                        item {
-                            InstalledAppsExperimentalCard()
-                        }
-                    }
-                }
-            }
                     }
                 }
             }
         }
     }
 }
-}
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppModeSelector(
+private fun PiCheckHeader(
     currentMode: AppListMode,
     onModeSelected: (AppListMode) -> Unit,
 ) {
-    Card(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp),
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, PiCheckCardBorder),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            .background(PiCheckBurgundy),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(3.dp),
+        CenterAlignedTopAppBar(
+            title = {
+                Text(
+                    text = "PI-check",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = PiCheckBurgundy,
+                titleContentColor = Color.White,
+            ),
+        )
+
+        HeaderSectionTabs(
+            currentMode = currentMode,
+            onModeSelected = onModeSelected,
+        )
+    }
+}
+
+@Composable
+private fun HeaderSectionTabs(
+    currentMode: AppListMode,
+    onModeSelected: (AppListMode) -> Unit,
+) {
+    val tabs = listOf(
+        AppListMode.REGISTERED to "Registradas",
+        AppListMode.SEARCH to "Buscar",
+        AppListMode.UPLOAD to "Subir APK",
+    )
+
+    val selectedIndex = tabs.indexOfFirst { it.first == currentMode }
+        .coerceAtLeast(0)
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .padding(horizontal = 10.dp),
+    ) {
+        val tabWidth = maxWidth / tabs.size.toFloat()
+
+        val indicatorOffset by animateDpAsState(
+            targetValue = tabWidth * selectedIndex.toFloat(),
+            animationSpec = tween(durationMillis = 260),
+            label = "header-tab-indicator-offset",
+        )
+
+        Column(
+            modifier = Modifier.fillMaxSize(),
         ) {
-            ModeSelectorSegment(
-                text = "Registradas",
-                isSelected = currentMode == AppListMode.REGISTERED,
-                position = SegmentPosition.START,
-                selectedColor = PiCheckBurgundy,
-                modifier = Modifier.weight(1f),
-                onClick = {
-                    onModeSelected(AppListMode.REGISTERED)
-                },
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                tabs.forEach { (mode, label) ->
+                    HeaderSectionTab(
+                        text = label,
+                        isSelected = currentMode == mode,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onModeSelected(mode) },
+                    )
+                }
+            }
 
-            ModeSelectorSegment(
-                text = "Buscar",
-                isSelected = currentMode == AppListMode.SEARCH,
-                position = SegmentPosition.CENTER,
-                selectedColor = PiCheckBlue,
-                modifier = Modifier.weight(1f),
-                onClick = {
-                    onModeSelected(AppListMode.SEARCH)
-                },
-            )
-
-            ModeSelectorSegment(
-                text = "Subir APK",
-                isSelected = currentMode == AppListMode.UPLOAD,
-                position = SegmentPosition.END,
-                selectedColor = ElectricBlue,
-                modifier = Modifier.weight(1f),
-                onClick = {
-                    onModeSelected(AppListMode.UPLOAD)
-                },
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .offset(x = indicatorOffset)
+                        .width(tabWidth)
+                        .fillMaxHeight()
+                        .padding(horizontal = 18.dp)
+                        .clip(
+                            RoundedCornerShape(
+                                topStart = 3.dp,
+                                topEnd = 3.dp,
+                            )
+                        )
+                        .background(Color.White),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun ModeSelectorSegment(
+private fun HeaderSectionTab(
     text: String,
     isSelected: Boolean,
-    position: SegmentPosition,
-    selectedColor: Color,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val shape = when (position) {
-        SegmentPosition.START -> RoundedCornerShape(
-            topStart = 22.dp,
-            bottomStart = 22.dp,
-            topEnd = 10.dp,
-            bottomEnd = 10.dp,
-        )
-        SegmentPosition.CENTER -> RoundedCornerShape(10.dp)
-        SegmentPosition.END -> RoundedCornerShape(
-            topStart = 10.dp,
-            bottomStart = 10.dp,
-            topEnd = 22.dp,
-            bottomEnd = 22.dp,
-        )
-    }
-
-    val backgroundColor by animateColorAsState(
-        targetValue = if (isSelected) selectedColor else PiCheckBackground,
-        animationSpec = tween(durationMillis = 180),
-        label = "tab-background",
-    )
     val textColor by animateColorAsState(
-        targetValue = if (isSelected) Color.White else PiCheckDarkText,
+        targetValue = if (isSelected) {
+            Color.White
+        } else {
+            Color.White.copy(alpha = 0.70f)
+        },
         animationSpec = tween(durationMillis = 180),
-        label = "tab-text",
+        label = "header-tab-text-color",
     )
 
     Box(
         modifier = modifier
-            .fillMaxSize()
-            .background(backgroundColor, shape)
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(10.dp))
             .clickable { onClick() },
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
             color = textColor,
-            fontWeight = FontWeight.Bold,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
             style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
