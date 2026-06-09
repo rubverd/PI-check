@@ -803,6 +803,8 @@ private fun DeviceAppCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            DeviceAppIcon(app = app, size = 52)
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = app.name,
@@ -813,7 +815,7 @@ private fun DeviceAppCard(
                 )
                 Text(
                     text = app.packageName,
-                    color = PiCheckDarkText,
+                    color = PiCheckDarkText.copy(alpha = 0.75f),
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -840,6 +842,54 @@ private fun DeviceAppCard(
             ) {
                 Text("Subir")
             }
+        }
+    }
+}
+
+
+@Composable
+private fun DeviceAppIcon(
+    app: DeviceAppInfo,
+    size: Int = 52,
+) {
+    val context = LocalContext.current
+    var iconDrawable by remember(app.packageName) {
+        mutableStateOf<android.graphics.drawable.Drawable?>(null)
+    }
+
+    LaunchedEffect(app.packageName) {
+        val drawable = withContext(Dispatchers.IO) {
+            try {
+                context.packageManager.getApplicationIcon(app.packageName)
+            } catch (exception: Exception) {
+                null
+            }
+        }
+
+        iconDrawable = drawable
+    }
+
+    Box(
+        modifier = Modifier
+            .size(size.dp)
+            .background(PiCheckBlue, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = app.name.firstOrNull()?.uppercase() ?: "?",
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+        )
+
+        if (iconDrawable != null) {
+            AsyncImage(
+                model = iconDrawable,
+                contentDescription = "Icono de ${app.name}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(size.dp)
+                    .clip(CircleShape),
+            )
         }
     }
 }
