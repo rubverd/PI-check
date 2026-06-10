@@ -16,6 +16,7 @@ from app.application.services.app_registration_service import (
     AppRegistrationError,
     AppRegistrationService,
 )
+from app.core.public_urls import build_public_artifact_url
 from app.domain.value_objects.mobsf_analysis_status import MobSFAnalysisStatus
 from app.infrastructure.database.session import get_db_session
 from app.infrastructure.external.google_play_client import (
@@ -78,7 +79,6 @@ def search_apps(
 
 @router.post("/register-local-apk", response_model=RegisterLocalApkResponse)
 def register_local_apk(
-    request: Request,
     payload: RegisterLocalApkRequest,
     db: Session = Depends(get_db_session),
 ):
@@ -215,7 +215,7 @@ def get_registered_apps(request: Request, db: Session = Depends(get_db_session))
                 app_id=app.id_app,
                 name=app.nombre,
                 developer=app.desarrollador,
-                icon=_public_icon_url(app.icono, request),
+                icon=build_public_artifact_url(app.icono),
                 category=app.categoria or version.categoria or "",
                 versions=[],
                 version=version_item.version,
@@ -247,7 +247,7 @@ def get_analyzed_apps(request: Request, db: Session = Depends(get_db_session)):
             app_id=app.id_app,
             name=app.nombre,
             developer=app.desarrollador,
-            icon=_public_icon_url(app.icono, request),
+            icon=build_public_artifact_url(app.icono),
             version=version.version,
             category=app.categoria or version.categoria or "",
             analysis_date=(
@@ -296,7 +296,7 @@ def _local_apk_response(
     request: Request,
 ) -> RegisterLocalApkResponse:
     version_item = _version_to_registered_item(prepared.app_version)
-    icon_url = _public_icon_url(prepared.application.icono, request)
+    icon_url = build_public_artifact_url(prepared.application.icono)
     app_item = RegisteredAppItem(
         app_id=prepared.application.id_app,
         name=prepared.application.nombre,
