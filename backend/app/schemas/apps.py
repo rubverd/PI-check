@@ -80,6 +80,13 @@ class RegisterLocalApkResponse(BaseModel):
     run_mobsf: bool
     mobsf_report_available: bool = False
     already_registered: bool = False
+    id_app: str
+    package_name: str
+    app_name: str
+    version_name: str
+    ruta_apk: Optional[str] = None
+    estado_mobsf: MobsfStatusApi
+    message: str
     messages: list[str]
 
 

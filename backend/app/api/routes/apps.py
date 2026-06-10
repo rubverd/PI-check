@@ -122,11 +122,6 @@ def register_local_apk(
         logger.exception("Error controlado registrando APK local")
         raise HTTPException(status_code=422, detail=str(exc))
 
-    except (AppRegistrationError, AppAnalysisError) as exc:
-        db.rollback()
-        logger.exception("Error controlado registrando APK local")
-        raise HTTPException(status_code=422, detail=str(exc))
-
     except Exception as exc:
         db.rollback()
         logger.exception("Error inesperado registrando APK local")
@@ -314,13 +309,27 @@ def _local_apk_response(
         ruta_apk=version_item.ruta_apk,
     )
 
+    already_registered = prepared.version_already_registered
+    message = (
+        "La aplicación ya tiene esta versión registrada en el sistema."
+        if already_registered
+        else "APK registrado correctamente."
+    )
+
     return RegisterLocalApkResponse(
         app=app_item,
         version=version_item,
         run_mobsf=run_mobsf,
         mobsf_report_available=mobsf_report_available,
-        already_registered=prepared.version_already_registered,
-        messages=messages,
+        already_registered=already_registered,
+        id_app=app_item.app_id,
+        package_name=app_item.app_id,
+        app_name=app_item.name,
+        version_name=version_item.version,
+        ruta_apk=version_item.ruta_apk,
+        estado_mobsf=version_item.mobsf_status,
+        message=message,
+        messages=[message, *messages] if message not in messages else messages,
     )
 
 
