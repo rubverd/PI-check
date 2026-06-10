@@ -79,3 +79,6 @@ class ComparisonAnalysisResponse(BaseModel):
     app_a: VersionReportInfo
     app_b: VersionReportInfo
     id_indice_aplicado: Optional[str] = None
+    comparison: dict[str, Any]
+    comparison_json: str
+    comparison_artifact_path: Optional[str] = None

@@ -58,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -77,6 +78,13 @@ import es.uva.picheck.ui.theme.PiCheckBackground
 import es.uva.picheck.ui.theme.PiCheckBlue
 import es.uva.picheck.ui.theme.PiCheckBurgundy
 import es.uva.picheck.ui.theme.PiCheckCardBorder
+import es.uva.picheck.ui.theme.PiCheckHCBlue
+import es.uva.picheck.ui.theme.PiCheckHCCyan
+import es.uva.picheck.ui.theme.PiCheckHCGreen
+import es.uva.picheck.ui.theme.PiCheckHCHint
+import es.uva.picheck.ui.theme.PiCheckLegacyBg
+import es.uva.picheck.ui.theme.PiCheckLegacyDark
+import es.uva.picheck.ui.theme.PiCheckLegacyGray
 import es.uva.picheck.ui.theme.PiCheckDarkText
 import es.uva.picheck.data.model.PiCheckComparisonAnalysis
 import kotlinx.coroutines.Dispatchers
@@ -1129,48 +1137,83 @@ private fun RegisteredVersionRow(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
+    val isHC = version.integrationModel == IntegrationModel.HEALTH_CONNECT
+    val isLegacy = version.integrationModel == IntegrationModel.LEGACY
+    val backgroundColor = when {
+        isSelected && isHC -> Color(0xFFE3EAFF)
+        isSelected -> Color(0xFFE2E8F0)
+        isHC -> PiCheckHCHint
+        isLegacy -> PiCheckLegacyBg
+        else -> Color(0xFFF8F8FB)
+    }
+    val primaryTextColor = if (isLegacy) PiCheckLegacyDark else PiCheckDarkText
+    val secondaryTextColor = when {
+        isHC -> PiCheckDarkText.copy(alpha = 0.82f)
+        isLegacy -> PiCheckLegacyGray
+        else -> PiCheckDarkText.copy(alpha = 0.78f)
+    }
+    val analysisColor = when {
+        isHC -> PiCheckHCBlue
+        isLegacy -> PiCheckLegacyGray
+        else -> PiCheckDarkText
+    }
+    val hcGradient = Brush.linearGradient(
+        colors = listOf(PiCheckHCBlue, PiCheckHCCyan, PiCheckHCGreen),
+    )
+    val labelText = version.integrationModelShort.ifBlank { version.integrationModel.shortLabel() }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (isSelected) PiCheckBackground else Color(0xFFF8F8FB))
+            .background(backgroundColor)
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = "Versión ${version.version}",
-                color = PiCheckDarkText,
-                fontWeight = FontWeight.SemiBold,
+                color = primaryTextColor,
+                fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = "Fecha: ${version.versionDateLabel()}",
-                color = PiCheckDarkText,
+                color = secondaryTextColor,
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
                 text = version.analysisLabel(),
-                color = PiCheckDarkText,
+                color = analysisColor,
                 style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (isHC) FontWeight.Medium else FontWeight.Normal,
             )
         }
 
-        Text(
-            text = version.integrationModelShort.ifBlank { version.integrationModel.shortLabel() },
-            color = ElectricBlue,
-            fontWeight = FontWeight.ExtraBold,
-            style = MaterialTheme.typography.titleMedium,
-        )
+        if (isHC) {
+            Text(
+                text = labelText,
+                fontWeight = FontWeight.ExtraBold,
+                style = MaterialTheme.typography.titleLarge.copy(brush = hcGradient),
+            )
+        } else {
+            Text(
+                text = labelText,
+                color = if (isLegacy) PiCheckLegacyDark else ElectricBlue,
+                fontWeight = if (isLegacy) FontWeight.Black else FontWeight.ExtraBold,
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
 
         if (isSelected) {
             Text(
                 text = "✓",
                 color = PiCheckBurgundy,
                 fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium,
             )
         }
     }

@@ -300,6 +300,9 @@ object PiCheckApiClient {
             appB = getJSONObject("app_b").toPiCheckVersionReport(),
             idIndiceAplicado = optNullableString("id_indice_aplicado"),
             rawJson = toString(2),
+            comparisonJson = optNullableJsonAsPrettyString("comparison")
+                ?: optNullableString("comparison_json"),
+            comparisonArtifactPath = optNullableString("comparison_artifact_path"),
         )
 
     private fun JSONObject.toPiCheckVersionReport(): PiCheckVersionReport =

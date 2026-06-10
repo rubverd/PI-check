@@ -81,6 +81,7 @@ ARTIFACT_DIRS=(
   "backend/artifacts/tmp/apks"
   "backend/artifacts/tmp/uploads"
   "backend/artifacts/apks"
+  "backend/artifacts/comparisons"
   "backend/artifacts/reports/mobsf"
   "backend/artifacts/reports/mastg"
   "backend/artifacts/reports/comparisons"
@@ -228,6 +229,7 @@ if [[ "$SKIP_ENV" != "true" ]]; then
     set_env_value "$ENV_FILE" "MAX_UPLOAD_APK_SIZE_MB" "$MAX_UPLOAD_APK_SIZE_MB"
     set_env_value "$ENV_FILE" "MOBSF_ANALYSIS_MODE" "${MOBSF_ANALYSIS_MODE:-sync}"
     set_env_value "$ENV_FILE" "MOBSF_MAX_PARALLEL_ANALYSES" "${MOBSF_MAX_PARALLEL_ANALYSES:-2}"
+    set_env_value "$ENV_FILE" "COMPARISON_ARTIFACTS_DIR" "/app/artifacts/comparisons"
   fi
 else
   echo "[ENV] Skipping .env creation/update because --skip-env/SKIP_ENV=true was provided"

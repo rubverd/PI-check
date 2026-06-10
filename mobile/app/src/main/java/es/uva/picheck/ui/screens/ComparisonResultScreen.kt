@@ -99,8 +99,8 @@ fun ComparisonResultScreen(
 
             item {
                 JsonPreviewCard(
-                    title = "JSON devuelto por el backend",
-                    json = result.rawJson,
+                    title = "JSON de comparativa generado",
+                    json = result.comparisonJson ?: result.rawJson,
                     expanded = showFullJson,
                     onToggle = {
                         showFullJson = !showFullJson
@@ -154,6 +154,10 @@ private fun SummaryCard(result: PiCheckComparisonAnalysis) {
             InfoLine(
                 label = "Índice aplicado",
                 value = result.idIndiceAplicado ?: "No aplicado todavía",
+            )
+            InfoLine(
+                label = "Archivo temporal",
+                value = result.comparisonArtifactPath ?: "No generado",
             )
         }
     }
