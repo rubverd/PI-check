@@ -16,6 +16,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.DataOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.InputStream
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URLEncoder
@@ -78,6 +81,45 @@ object PiCheckApiClient {
         category: String? = null,
         sourceLabel: String = "mobile_upload",
         runMobsf: Boolean = false,
+    ): String = uploadApkMultipart(
+        fileName = fileName,
+        title = title,
+        developer = developer,
+        category = category,
+        sourceLabel = sourceLabel,
+        runMobsf = runMobsf,
+        openInputStream = { context.contentResolver.openInputStream(uri) },
+        missingFileMessage = "No se pudo abrir el APK seleccionado",
+    )
+
+    suspend fun uploadApkFile(
+        file: File,
+        fileName: String,
+        title: String? = null,
+        developer: String? = null,
+        category: String? = null,
+        sourceLabel: String = "mobile_installed_app",
+        runMobsf: Boolean = false,
+    ): String = uploadApkMultipart(
+        fileName = fileName,
+        title = title,
+        developer = developer,
+        category = category,
+        sourceLabel = sourceLabel,
+        runMobsf = runMobsf,
+        openInputStream = { FileInputStream(file) },
+        missingFileMessage = "No se pudo abrir el APK instalado",
+    )
+
+    private suspend fun uploadApkMultipart(
+        fileName: String,
+        title: String?,
+        developer: String?,
+        category: String?,
+        sourceLabel: String,
+        runMobsf: Boolean,
+        openInputStream: () -> InputStream?,
+        missingFileMessage: String,
     ): String = withContext(Dispatchers.IO) {
         val boundary = "----PiCheckBoundary${System.currentTimeMillis()}"
         val connection = (URL("$BASE_URL/api/apps/upload-apk").openConnection() as HttpURLConnection).apply {
@@ -95,7 +137,7 @@ object PiCheckApiClient {
             output.writeFormField(boundary, "category", category.orEmpty())
             output.writeFormField(boundary, "source_label", sourceLabel)
             output.writeFormField(boundary, "run_mobsf", runMobsf.toString())
-            output.writeFileField(context, uri, boundary, "file", fileName)
+            output.writeFileField(boundary, "file", fileName, openInputStream, missingFileMessage)
             output.writeBytes("--$boundary--\r\n")
             output.flush()
         }
@@ -118,11 +160,11 @@ object PiCheckApiClient {
     }
 
     private fun DataOutputStream.writeFileField(
-        context: Context,
-        uri: Uri,
         boundary: String,
         fieldName: String,
         fileName: String,
+        openInputStream: () -> InputStream?,
+        missingFileMessage: String,
     ) {
         writeBytes("--$boundary\r\n")
         writeBytes(
@@ -130,14 +172,14 @@ object PiCheckApiClient {
         )
         writeBytes("Content-Type: application/vnd.android.package-archive\r\n\r\n")
 
-        context.contentResolver.openInputStream(uri)?.use { input ->
+        openInputStream()?.use { input ->
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             while (true) {
                 val read = input.read(buffer)
                 if (read == -1) break
                 write(buffer, 0, read)
             }
-        } ?: throw IllegalStateException("No se pudo abrir el APK seleccionado")
+        } ?: throw IllegalStateException(missingFileMessage)
 
         writeBytes("\r\n")
     }
@@ -258,6 +300,9 @@ object PiCheckApiClient {
             appB = getJSONObject("app_b").toPiCheckVersionReport(),
             idIndiceAplicado = optNullableString("id_indice_aplicado"),
             rawJson = toString(2),
+            comparisonJson = optNullableJsonAsPrettyString("comparison")
+                ?: optNullableString("comparison_json"),
+            comparisonArtifactPath = optNullableString("comparison_artifact_path"),
         )
 
     private fun JSONObject.toPiCheckVersionReport(): PiCheckVersionReport =
