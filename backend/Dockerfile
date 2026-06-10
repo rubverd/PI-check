@@ -32,6 +32,7 @@ COPY alembic ./alembic
 RUN mkdir -p /app/artifacts/tmp/apks \
     && mkdir -p /app/artifacts/tmp/uploads \
     && mkdir -p /app/artifacts/apks \
+    && mkdir -p /app/artifacts/public/icons \
     && mkdir -p /app/artifacts/reports/mobsf \
     && mkdir -p /app/artifacts/reports/mastg \
     && mkdir -p /app/artifacts/reports/comparisons
