@@ -746,6 +746,11 @@ class AppRegistrationService:
                 f"El archivo APK/XAPK/APKS/APKM no existe: {path}"
             )
 
+        if not os.access(path, os.R_OK):
+            raise AppRegistrationError(
+                f"El archivo APK/XAPK/APKS/APKM no es legible: {path}"
+            )
+
         if path.suffix.lower() not in SUPPORTED_LOCAL_APK_EXTENSIONS:
             raise AppRegistrationError(
                 "Extensión no soportada: "
