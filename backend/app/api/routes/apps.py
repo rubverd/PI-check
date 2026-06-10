@@ -4,7 +4,7 @@ from collections import OrderedDict
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -78,26 +78,27 @@ def search_apps(
 
 @router.post("/register-local-apk", response_model=RegisterLocalApkResponse)
 def register_local_apk(
-    request: RegisterLocalApkRequest,
+    request: Request,
+    payload: RegisterLocalApkRequest,
     db: Session = Depends(get_db_session),
 ):
     logger.info(
         "[MANUAL_APK] Solicitud de registro local recibida: apk_path=%s run_mobsf=%s source=%s",
-        request.apk_path,
-        request.run_mobsf,
-        request.source_label,
+        payload.apk_path,
+        payload.run_mobsf,
+        payload.source_label,
     )
 
     registration_service = AppRegistrationService(db)
     try:
         prepared = registration_service.register_local_apk(
-            apk_path=request.apk_path,
-            title=request.title,
-            developer=request.developer,
-            category=request.category,
-            icon=request.icon,
-            source_label=request.source_label,
-            version_date=request.version_date,
+            apk_path=payload.apk_path,
+            title=payload.title,
+            developer=payload.developer,
+            category=payload.category,
+            icon=payload.icon,
+            source_label=payload.source_label,
+            version_date=payload.version_date,
         )
         db.commit()
         logger.info(
@@ -107,14 +108,15 @@ def register_local_apk(
         )
         messages, mobsf_report_available = _maybe_run_mobsf(
             prepared=prepared,
-            run_mobsf=request.run_mobsf,
+            run_mobsf=payload.run_mobsf,
             db=db,
         )
         return _local_apk_response(
             prepared=prepared,
-            run_mobsf=request.run_mobsf,
+            run_mobsf=payload.run_mobsf,
             mobsf_report_available=mobsf_report_available,
             messages=messages,
+            request=request,
         )
 
     except (AppRegistrationError, AppAnalysisError) as exc:
@@ -133,6 +135,7 @@ def register_local_apk(
 
 @router.post("/upload-apk", response_model=RegisterLocalApkResponse)
 def upload_apk(
+    request: Request,
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
     developer: str | None = Form(default=None),
@@ -180,6 +183,7 @@ def upload_apk(
             run_mobsf=run_mobsf,
             mobsf_report_available=mobsf_report_available,
             messages=messages,
+            request=request,
         )
 
     except (AppRegistrationError, AppAnalysisError) as exc:
@@ -199,7 +203,7 @@ def upload_apk(
 
 
 @router.get("/registered", response_model=RegisteredAppsResponse)
-def get_registered_apps(db: Session = Depends(get_db_session)):
+def get_registered_apps(request: Request, db: Session = Depends(get_db_session)):
     rows = _get_all_registered_versions(db)
     grouped: OrderedDict[str, RegisteredAppItem] = OrderedDict()
 
@@ -211,7 +215,7 @@ def get_registered_apps(db: Session = Depends(get_db_session)):
                 app_id=app.id_app,
                 name=app.nombre,
                 developer=app.desarrollador,
-                icon=app.icono,
+                icon=_public_icon_url(app.icono, request),
                 category=app.categoria or version.categoria or "",
                 versions=[],
                 version=version_item.version,
@@ -232,7 +236,7 @@ def get_registered_apps(db: Session = Depends(get_db_session)):
 
 
 @router.get("/analyzed", response_model=AnalyzedAppsResponse)
-def get_analyzed_apps(db: Session = Depends(get_db_session)):
+def get_analyzed_apps(request: Request, db: Session = Depends(get_db_session)):
     rows = _get_latest_registered_versions(db)
     analyzed_rows = [
         (app, version) for app, version in rows if _has_mobsf_report(version)
@@ -243,7 +247,7 @@ def get_analyzed_apps(db: Session = Depends(get_db_session)):
             app_id=app.id_app,
             name=app.nombre,
             developer=app.desarrollador,
-            icon=app.icono,
+            icon=_public_icon_url(app.icono, request),
             version=version.version,
             category=app.categoria or version.categoria or "",
             analysis_date=(
@@ -289,13 +293,15 @@ def _local_apk_response(
     run_mobsf: bool,
     mobsf_report_available: bool,
     messages: list[str],
+    request: Request,
 ) -> RegisterLocalApkResponse:
     version_item = _version_to_registered_item(prepared.app_version)
+    icon_url = _public_icon_url(prepared.application.icono, request)
     app_item = RegisteredAppItem(
         app_id=prepared.application.id_app,
         name=prepared.application.nombre,
         developer=prepared.application.desarrollador,
-        icon=prepared.application.icono,
+        icon=icon_url,
         category=prepared.application.categoria or prepared.app_version.categoria or "",
         versions=[version_item],
         version=version_item.version,
@@ -326,6 +332,7 @@ def _local_apk_response(
         package_name=app_item.app_id,
         app_name=app_item.name,
         version_name=version_item.version,
+        icon=icon_url,
         ruta_apk=version_item.ruta_apk,
         estado_mobsf=version_item.mobsf_status,
         message=message,
@@ -426,6 +433,19 @@ def _has_mobsf_report(version: AppVersionModel) -> bool:
         and version.hash_mobsf
         and version.ruta_informe_mobsf
     )
+
+
+def _public_icon_url(icon: str | None, request: Request) -> str | None:
+    if not icon:
+        return None
+
+    if icon.startswith(("http://", "https://")):
+        return icon
+
+    if icon.startswith("/"):
+        return str(request.base_url).rstrip("/") + icon
+
+    return icon
 
 
 def _has_mobsf_report_domain(version) -> bool:

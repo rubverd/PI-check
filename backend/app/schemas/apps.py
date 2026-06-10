@@ -84,6 +84,7 @@ class RegisterLocalApkResponse(BaseModel):
     package_name: str
     app_name: str
     version_name: str
+    icon: Optional[str] = None
     ruta_apk: Optional[str] = None
     estado_mobsf: MobsfStatusApi
     message: str

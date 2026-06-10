@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.api.router import api_router
@@ -20,6 +22,10 @@ app = FastAPI(
     description="Backend preliminar para la herramienta PI-check",
     version="0.3.0",
 )
+
+PUBLIC_ARTIFACTS_DIR = Path("/app/artifacts/public")
+PUBLIC_ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=PUBLIC_ARTIFACTS_DIR), name="static")
 
 
 class HistoryRequest(BaseModel):
