@@ -23,6 +23,8 @@ class ExtractedApkMetadata:
     categoria: str | None
     modelo_integracion: IntegrationModel
     apk_sha256: str | None
+    app_label: str | None = None
+    icon: str | None = None
 
 
 def extract_apk_metadata(
@@ -31,6 +33,7 @@ def extract_apk_metadata(
     fallback_version: str | None = None,
     fallback_category: str | None = None,
     fallback_version_date: str | None = None,
+    extract_icon: bool = True,
 ) -> ExtractedApkMetadata:
     apk_sha256 = calculate_sha256(apk_path)
 
@@ -69,6 +72,17 @@ def extract_apk_metadata(
 
     fecha_version = parse_date_or_none(fallback_version_date)
 
+    app_label = aapt_metadata.get("app_label")
+    icon_url = None
+
+    if extract_icon and metadata_apk_path is not None:
+        icon_url = _extract_icon_to_public_storage(
+            apk_path=metadata_apk_path,
+            preferred_icon_path=aapt_metadata.get("icon_path"),
+            id_app=id_app,
+            version=version,
+        )
+
     modelo_integracion = detect_integration_model(apk_path)
 
     logger.info(
@@ -88,6 +102,8 @@ def extract_apk_metadata(
         categoria=fallback_category,
         modelo_integracion=modelo_integracion,
         apk_sha256=apk_sha256,
+        app_label=app_label,
+        icon=icon_url,
     )
 
 
@@ -333,8 +349,162 @@ def _parse_aapt_badging(output: str) -> dict[str, str]:
     if version_name:
         metadata["version_name"] = version_name
 
+    app_label = _extract_application_label(output)
+    icon_path = _extract_application_icon_path(output)
+
+    if app_label:
+        metadata["app_label"] = app_label
+
+    if icon_path:
+        metadata["icon_path"] = icon_path
+
     return metadata
 
+
+
+def _extract_application_label(output: str) -> str | None:
+    for prefix in ("application-label:", "application-label-es:", "application-label-en:"):
+        line = next((line for line in output.splitlines() if line.startswith(prefix)), None)
+        if line:
+            label = _extract_first_quoted_value(line)
+            if label:
+                return label
+
+    application_line = next(
+        (line for line in output.splitlines() if line.startswith("application:")),
+        None,
+    )
+    if application_line:
+        return _extract_quoted_value(application_line, "label")
+
+    return None
+
+
+def _extract_application_icon_path(output: str) -> str | None:
+    icon_lines = [
+        line
+        for line in output.splitlines()
+        if line.startswith("application-icon-") or line.startswith("application:")
+    ]
+    candidates: list[tuple[int, str]] = []
+
+    for line in icon_lines:
+        icon_path = _extract_first_quoted_value(line) if line.startswith("application-icon-") else _extract_quoted_value(line, "icon")
+        if not icon_path:
+            continue
+        candidates.append((_icon_path_score(icon_path), icon_path))
+
+    if not candidates:
+        return None
+
+    return sorted(candidates, reverse=True)[0][1]
+
+
+def _extract_first_quoted_value(text: str) -> str | None:
+    match = re.search(r"'([^']+)'", text)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _extract_icon_to_public_storage(
+    apk_path: Path,
+    preferred_icon_path: str | None,
+    id_app: str,
+    version: str,
+) -> str | None:
+    if not zipfile.is_zipfile(apk_path):
+        return None
+
+    with zipfile.ZipFile(apk_path, "r") as archive:
+        member = _select_icon_member(archive, preferred_icon_path)
+        if member is None:
+            logger.info("[ICON] No se encontró icono PNG/WEBP extraíble en %s", apk_path)
+            return None
+
+        suffix = Path(member.filename).suffix.lower()
+        public_root = Path("/app/artifacts/public")
+        output_dir = public_root / "icons" / _safe_path_part(id_app) / _safe_path_part(version)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"icon{suffix}"
+
+        with archive.open(member, "r") as source, output_path.open("wb") as target:
+            shutil.copyfileobj(source, target)
+
+    logger.info("[ICON] Icono extraído del APK: %s", output_path)
+    return f"/static/icons/{_safe_path_part(id_app)}/{_safe_path_part(version)}/{output_path.name}"
+
+
+def _select_icon_member(
+    archive: zipfile.ZipFile,
+    preferred_icon_path: str | None,
+) -> zipfile.ZipInfo | None:
+    members_by_name = {member.filename: member for member in archive.infolist() if not member.is_dir()}
+
+    if preferred_icon_path:
+        preferred_member = members_by_name.get(preferred_icon_path)
+        if preferred_member and preferred_member.filename.lower().endswith((".png", ".webp")):
+            return preferred_member
+
+    candidates = [
+        member
+        for member in archive.infolist()
+        if not member.is_dir() and _is_icon_raster_candidate(member.filename)
+    ]
+
+    if not candidates:
+        return None
+
+    return sorted(candidates, key=lambda member: (_icon_path_score(member.filename), member.file_size), reverse=True)[0]
+
+
+def _is_icon_raster_candidate(filename: str) -> bool:
+    lower = filename.lower()
+    if not lower.endswith((".png", ".webp")):
+        return False
+    if not (lower.startswith("res/mipmap") or lower.startswith("res/drawable")):
+        return False
+
+    name = Path(lower).stem
+    keywords = ("ic_launcher", "launcher", "app_icon", "icon")
+    return any(keyword in name for keyword in keywords)
+
+
+def _icon_path_score(path: str) -> int:
+    lower = path.lower()
+    score = 0
+    density_scores = {
+        "xxxhdpi": 600,
+        "xxhdpi": 500,
+        "xhdpi": 400,
+        "hdpi": 300,
+        "mdpi": 200,
+    }
+    for density, density_score in density_scores.items():
+        if density in lower:
+            score += density_score
+            break
+
+    if "ic_launcher" in lower:
+        score += 80
+    elif "launcher" in lower:
+        score += 60
+    elif "app_icon" in lower:
+        score += 50
+    elif "icon" in lower:
+        score += 30
+
+    if lower.endswith(".png"):
+        score += 10
+    elif lower.endswith(".webp"):
+        score += 8
+
+    return score
+
+
+def _safe_path_part(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", value.strip())
+    return cleaned[:120] or "unknown"
 
 def _extract_quoted_value(text: str, key: str) -> str | None:
     match = re.search(rf"{key}='([^']+)'", text)

@@ -247,6 +247,20 @@ class AppRegistrationService:
             extracted_metadata.modelo_integracion.value,
         )
 
+        if extracted_metadata.app_label:
+            messages.append(
+                f"[METADATA] Nombre de aplicación extraído del APK: {extracted_metadata.app_label}."
+            )
+        else:
+            messages.append(
+                "[METADATA] No se pudo extraer nombre visible del APK; se usará fallback."
+            )
+
+        if extracted_metadata.icon:
+            messages.append(f"[ICON] Icono extraído del APK: {extracted_metadata.icon}.")
+        else:
+            messages.append("[ICON] No se encontró icono PNG/WEBP extraíble en el APK.")
+
         existing_application = self.application_repository.find_by_id(
             extracted_metadata.id_app
         )
@@ -329,16 +343,16 @@ class AppRegistrationService:
             )
             saved_version = self.app_version_repository.save(existing_version)
 
-            saved_application = existing_application or Application(
+            saved_application = self._save_application_metadata(
                 id_app=saved_version.id_app,
-                nombre=title or saved_version.id_app,
-                icono=icon,
-                categoria=category or saved_version.categoria,
-                desarrollador=developer,
-                modelo_integracion_actual=saved_version.modelo_integracion,
+                existing_application=existing_application,
+                extracted_metadata=extracted_metadata,
+                title=title,
+                developer=developer,
+                category=category or saved_version.categoria,
+                explicit_icon=icon,
+                messages=messages,
             )
-            if existing_application is None:
-                saved_application = self.application_repository.save(saved_application)
 
             self._cleanup_download_parent_dirs(path, messages)
 
@@ -372,21 +386,16 @@ class AppRegistrationService:
                 f"[DB] Aplicación existente. Se registra nueva versión: {extracted_metadata.id_app}."
             )
 
-        application = Application(
+        saved_application = self._save_application_metadata(
             id_app=extracted_metadata.id_app,
-            nombre=title
-            or (existing_application.nombre if existing_application else None)
-            or extracted_metadata.id_app,
-            icono=icon
-            or (existing_application.icono if existing_application else None),
-            categoria=category
-            or extracted_metadata.categoria
-            or (existing_application.categoria if existing_application else None),
-            desarrollador=developer
-            or (existing_application.desarrollador if existing_application else None),
-            modelo_integracion_actual=extracted_metadata.modelo_integracion,
+            existing_application=existing_application,
+            extracted_metadata=extracted_metadata,
+            title=title,
+            developer=developer,
+            category=category or extracted_metadata.categoria,
+            explicit_icon=icon,
+            messages=messages,
         )
-        saved_application = self.application_repository.save(application)
 
         managed_apk_path = self._store_apk(
             source_path=path,
@@ -457,7 +466,7 @@ class AppRegistrationService:
 
         return self.ingest_apk(
             apk_path=path,
-            title=title or path.stem,
+            title=title,
             developer=developer,
             category=category,
             icon=icon,
@@ -484,7 +493,7 @@ class AppRegistrationService:
 
         return self.ingest_apk(
             apk_path=apk_path,
-            title=title or apk_path.stem,
+            title=title,
             developer=developer,
             category=category,
             icon=icon,
@@ -495,6 +504,73 @@ class AppRegistrationService:
             move_source_to_storage=True,
             initial_messages=messages,
         )
+
+    def _save_application_metadata(
+        self,
+        id_app: str,
+        existing_application: Application | None,
+        extracted_metadata: ExtractedApkMetadata,
+        title: str | None,
+        developer: str | None,
+        category: str | None,
+        explicit_icon: str | None,
+        messages: list[str],
+    ) -> Application:
+        resolved_name = self._resolve_application_name(
+            extracted_label=extracted_metadata.app_label,
+            explicit_title=title,
+            existing_name=existing_application.nombre if existing_application else None,
+            app_id=id_app,
+        )
+        resolved_icon = self._resolve_application_icon(
+            explicit_icon=explicit_icon,
+            extracted_icon=extracted_metadata.icon,
+            existing_icon=existing_application.icono if existing_application else None,
+        )
+
+        if resolved_name == id_app and not extracted_metadata.app_label:
+            messages.append(f"[METADATA] No se pudo extraer nombre visible; se usa fallback: {id_app}.")
+
+        if existing_application is not None:
+            if resolved_name != existing_application.nombre:
+                messages.append(f"[DB] Nombre de aplicación actualizado: {existing_application.nombre} -> {resolved_name}.")
+            if resolved_icon and resolved_icon != existing_application.icono:
+                messages.append(f"[DB] Icono de aplicación actualizado: {resolved_icon}.")
+
+        application = Application(
+            id_app=id_app,
+            nombre=resolved_name,
+            icono=resolved_icon,
+            categoria=category or (existing_application.categoria if existing_application else None),
+            desarrollador=developer
+            or (existing_application.desarrollador if existing_application else None),
+            modelo_integracion_actual=extracted_metadata.modelo_integracion,
+        )
+        return self.application_repository.save(application)
+
+    def _resolve_application_name(
+        self,
+        extracted_label: str | None,
+        explicit_title: str | None,
+        existing_name: str | None,
+        app_id: str,
+    ) -> str:
+        for candidate in (extracted_label, explicit_title, existing_name):
+            if candidate and not _is_bad_generated_name(candidate, app_id):
+                return candidate.strip()
+        return app_id
+
+    def _resolve_application_icon(
+        self,
+        explicit_icon: str | None,
+        extracted_icon: str | None,
+        existing_icon: str | None,
+    ) -> str | None:
+        if explicit_icon:
+            return explicit_icon
+        if existing_icon:
+            return existing_icon
+        return extracted_icon
 
     def _find_selected_existing_version(
         self,
@@ -746,6 +822,11 @@ class AppRegistrationService:
                 f"El archivo APK/XAPK/APKS/APKM no existe: {path}"
             )
 
+        if not os.access(path, os.R_OK):
+            raise AppRegistrationError(
+                f"El archivo APK/XAPK/APKS/APKM no es legible: {path}"
+            )
+
         if path.suffix.lower() not in SUPPORTED_LOCAL_APK_EXTENSIONS:
             raise AppRegistrationError(
                 "Extensión no soportada: "
@@ -941,6 +1022,29 @@ class AppRegistrationService:
         )
 
         return sorted_files[0]
+
+
+def _is_bad_generated_name(value: str, app_id: str) -> bool:
+    normalized = value.strip()
+    lower = normalized.lower()
+    app_lower = app_id.lower()
+
+    if not normalized:
+        return True
+
+    if re.match(r"^[0-9a-f]{16,}[_-]", lower):
+        return True
+
+    if "@" in normalized and app_lower in lower:
+        return True
+
+    if lower == app_lower:
+        return True
+
+    if lower.startswith("upload.") or lower.startswith("manual."):
+        return True
+
+    return False
 
 
 def _selected_app_key(selected_app: SelectedAppMetadata) -> str:
