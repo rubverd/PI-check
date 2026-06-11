@@ -72,6 +72,10 @@ def _to_response(
         app_a=_version_report_to_response(result.comparison.app_a),
         app_b=_version_report_to_response(result.comparison.app_b),
         id_indice_aplicado=result.comparison.id_indice_aplicado,
+        comparison=result.comparison_payload,
+        dashboard=result.dashboard_payload,
+        comparison_json=result.comparison_json,
+        comparison_artifact_path=result.comparison_artifact_path,
     )
 
 
