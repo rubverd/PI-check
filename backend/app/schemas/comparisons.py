@@ -1,6 +1,6 @@
 from typing import Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SelectedAppMetadata(BaseModel):
@@ -79,3 +79,8 @@ class ComparisonAnalysisResponse(BaseModel):
     app_a: VersionReportInfo
     app_b: VersionReportInfo
     id_indice_aplicado: Optional[str] = None
+    comparison: dict[str, Any]
+    dashboard: dict[str, Any] = Field(default_factory=dict)
+    technical_summary: dict[str, Any] = Field(default_factory=dict)
+    comparison_json: str
+    comparison_artifact_path: Optional[str] = None
