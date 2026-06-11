@@ -289,26 +289,29 @@ def _build_dashboard_payload(
     privacy_metrics = _metric_rows(
         [
             ("Permisos peligrosos", "dangerous_permissions"),
-            ("Permisos Health Connect", "health_connect_permissions"),
-            ("Trackers", "trackers"),
+            ("Permisos Health Connect", "health_connect_permissions", "context"),
+            ("Permisos de ubicación", "location_permissions", "lower"),
+            ("Permisos sensores/salud legacy", "sensor_permissions", "context"),
+            ("Permisos almacenamiento/media", "storage_permissions", "lower"),
+            ("Trackers", "trackers", "lower"),
         ],
         left_metrics,
         right_metrics,
     )
     security_metrics = _metric_rows(
         [
-            ("Hallazgos HIGH", "high_findings"),
-            ("Hallazgos WARNING", "warning_findings"),
+            ("Hallazgos HIGH", "high_findings", "lower"),
+            ("Hallazgos WARNING", "warning_findings", "lower"),
         ],
         left_metrics,
         right_metrics,
     )
     exposure_metrics = _metric_rows(
         [
-            ("Dominios", "domains"),
-            ("URLs", "urls"),
-            ("URLs HTTP", "http_urls"),
-            ("Trackers", "trackers"),
+            ("Dominios", "domains", "lower"),
+            ("URLs", "urls", "lower"),
+            ("URLs HTTP", "http_urls", "lower"),
+            ("Trackers", "trackers", "lower"),
         ],
         left_metrics,
         right_metrics,
@@ -329,35 +332,78 @@ def _build_dashboard_payload(
         len(technical_findings),
     )
 
+    mastg = {
+        "left_score": None,
+        "right_score": None,
+        "status": "pending",
+        "label": "Índice MASTG pendiente",
+    }
+    header = {
+        "app_name": _dashboard_app_name(prepared_a, prepared_b),
+        "left": _dashboard_header_side(prepared_a, report_a),
+        "right": _dashboard_header_side(prepared_b, report_b),
+        # Campos legacy conservados temporalmente para clientes antiguos.
+        "left_title": _dashboard_side_title(report_a),
+        "right_title": _dashboard_side_title(report_b),
+        "left_version": report_a.version_app.version,
+        "right_version": report_b.version_app.version,
+        "left_integration_model": report_a.version_app.modelo_integracion.value,
+        "right_integration_model": report_b.version_app.modelo_integracion.value,
+        "left_mobsf_status": report_a.version_app.estado_mobsf.value,
+        "right_mobsf_status": report_b.version_app.estado_mobsf.value,
+        "left_icon": build_public_artifact_url(prepared_a.application.icono),
+        "right_icon": build_public_artifact_url(prepared_b.application.icono),
+    }
+    platform_metrics = _metric_rows(
+        [
+            ("targetSdk", "target_sdk", "higher"),
+            ("minSdk", "min_sdk", "higher"),
+        ],
+        left_metrics,
+        right_metrics,
+    )
+    verdict_cards = _verdict_cards(
+        left_metrics=left_metrics,
+        right_metrics=right_metrics,
+        platform_metrics=platform_metrics,
+        privacy_metrics=privacy_metrics,
+        security_metrics=security_metrics,
+        exposure_metrics=exposure_metrics,
+    )
+    key_findings = [_key_finding(finding) for finding in technical_findings[:20]]
+    permission_diff = _permission_diff(left_report, right_report)
+    technical_summary = {
+        "left_report_available": report_a.mobsf_report is not None,
+        "right_report_available": report_b.mobsf_report is not None,
+        "left_report_size_bytes": _report_size_bytes(report_a),
+        "right_report_size_bytes": _report_size_bytes(report_b),
+        "raw_report_in_response": False,
+    }
+
     return {
+        "header": header,
+        "mastg": mastg,
+        # Alias legacy para clientes que aún esperan mastg_score.
         "mastg_score": {
             "left": None,
             "right": None,
             "status": "pending",
-        },
-        "header": {
-            "app_name": _dashboard_app_name(prepared_a, prepared_b),
-            "left_title": _dashboard_side_title(report_a),
-            "right_title": _dashboard_side_title(report_b),
-            "left_version": report_a.version_app.version,
-            "right_version": report_b.version_app.version,
-            "left_integration_model": report_a.version_app.modelo_integracion.value,
-            "right_integration_model": report_b.version_app.modelo_integracion.value,
-            "left_mobsf_status": report_a.version_app.estado_mobsf.value,
-            "right_mobsf_status": report_b.version_app.estado_mobsf.value,
-            "left_icon": build_public_artifact_url(prepared_a.application.icono),
-            "right_icon": build_public_artifact_url(prepared_b.application.icono),
         },
         "executive_summary": _executive_summary(
             comparison_payload=comparison_payload,
             left_metrics=left_metrics,
             right_metrics=right_metrics,
         ),
-        "quick_kpis": quick_kpis,
+        "verdict_cards": verdict_cards,
+        "quick_kpis": verdict_cards,
+        "platform_metrics": platform_metrics,
         "privacy_metrics": privacy_metrics,
         "security_metrics": security_metrics,
         "exposure_metrics": exposure_metrics,
-        "technical_findings": technical_findings[:20],
+        "key_findings": key_findings,
+        "technical_findings": key_findings,
+        "permission_diff": permission_diff,
+        "technical_summary": technical_summary,
     }
 
 
@@ -377,6 +423,32 @@ def _dashboard_side_title(report: VersionReport) -> str:
     if model == "LEGACY":
         return "Legacy"
     return "Modelo desconocido"
+
+
+def _integration_model_short(model: str) -> str:
+    if model == "HEALTH_CONNECT":
+        return "HC"
+    if model == "LEGACY":
+        return "L"
+    return "?"
+
+
+def _dashboard_header_side(
+    prepared: PreparedAppVersion,
+    report: VersionReport,
+) -> dict[str, Any]:
+    version = report.version_app
+    model = version.modelo_integracion.value
+    return {
+        "label": _dashboard_side_title(report),
+        "app_id": version.id_app,
+        "version": version.version,
+        "version_code": version.version_code,
+        "integration_model": model,
+        "integration_model_short": _integration_model_short(model),
+        "mobsf_status": version.estado_mobsf.value,
+        "icon": build_public_artifact_url(prepared.application.icono),
+    }
 
 
 def _extract_dashboard_metrics(report_data: dict[str, Any] | None) -> dict[str, float | None]:
@@ -410,10 +482,20 @@ def _extract_dashboard_metrics(report_data: dict[str, Any] | None) -> dict[str, 
             report_data,
             ["target_sdk", "target_sdk_version", "target_sdk_version_code"],
         ),
+        "min_sdk": _first_number(report_data, ["min_sdk", "min_sdk_version"]),
         "dangerous_permissions": float(_count_dangerous_permissions(permissions))
         if permissions is not None
         else None,
         "health_connect_permissions": float(_count_health_connect_permissions(permissions))
+        if permissions is not None
+        else None,
+        "location_permissions": float(_count_permissions_matching(permissions, ["location"]))
+        if permissions is not None
+        else None,
+        "sensor_permissions": float(_count_permissions_matching(permissions, ["sensor", "body", "activity_recognition"]))
+        if permissions is not None
+        else None,
+        "storage_permissions": float(_count_permissions_matching(permissions, ["storage", "media", "external"]))
         if permissions is not None
         else None,
         "trackers": float(len(trackers)) if trackers is not None else None,
@@ -439,6 +521,123 @@ def _extract_dashboard_metrics(report_data: dict[str, Any] | None) -> dict[str, 
         "total_permissions": _collection_count(permissions),
         "total_findings": len(findings),
     }
+
+
+
+def _verdict_cards(
+    left_metrics: dict[str, float | None],
+    right_metrics: dict[str, float | None],
+    platform_metrics: list[dict[str, Any]],
+    privacy_metrics: list[dict[str, Any]],
+    security_metrics: list[dict[str, Any]],
+    exposure_metrics: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    cards = [
+        _verdict_card(
+            title="Plataforma Android",
+            metrics=platform_metrics,
+            fallback_summary="Compara targetSdk/minSdk y adaptación a Android moderno.",
+        ),
+        _verdict_card(
+            title="Permisos sensibles",
+            metrics=privacy_metrics,
+            fallback_summary=(
+                "Health Connect puede declarar más permisos, pero suelen ser más granulares "
+                "para datos de salud."
+            ),
+            force_review=True,
+        ),
+        _verdict_card(
+            title="Riesgos MobSF",
+            metrics=security_metrics,
+            fallback_summary="Resume hallazgos técnicos HIGH/WARNING detectados por MobSF.",
+        ),
+        _verdict_card(
+            title="Exposición externa",
+            metrics=exposure_metrics,
+            fallback_summary="Compara trackers, dominios y URLs externas detectadas.",
+        ),
+        {
+            "title": "Comunicaciones",
+            "winner": _winner_for_values(
+                left_metrics.get("http_urls"),
+                right_metrics.get("http_urls"),
+                preferred="lower",
+            ),
+            "status": "warning"
+            if left_metrics.get("http_urls") or right_metrics.get("http_urls")
+            else "neutral",
+            "summary": "Revisa URLs HTTP y posibles comunicaciones sin cifrado.",
+        },
+        {
+            "title": "MASTG",
+            "winner": "pending",
+            "status": "neutral",
+            "summary": "El índice MASTG final está pendiente y no se infiere desde MobSF.",
+        },
+    ]
+    return cards
+
+
+def _verdict_card(
+    title: str,
+    metrics: list[dict[str, Any]],
+    fallback_summary: str,
+    force_review: bool = False,
+) -> dict[str, Any]:
+    if force_review or not metrics:
+        return {
+            "title": title,
+            "winner": "review",
+            "status": "warning" if force_review else "neutral",
+            "summary": fallback_summary,
+        }
+
+    left_wins = 0
+    right_wins = 0
+    for metric in metrics:
+        winner = _winner_for_values(
+            metric.get("left_value"),
+            metric.get("right_value"),
+            metric.get("preferred"),
+        )
+        if winner == "left":
+            left_wins += 1
+        elif winner == "right":
+            right_wins += 1
+
+    if left_wins > right_wins:
+        winner = "left"
+        status = "positive"
+    elif right_wins > left_wins:
+        winner = "right"
+        status = "warning"
+    else:
+        winner = "tie" if left_wins or right_wins else "review"
+        status = "neutral" if winner == "tie" else "warning"
+
+    return {
+        "title": title,
+        "winner": winner,
+        "status": status,
+        "summary": fallback_summary,
+    }
+
+
+def _winner_for_values(
+    left_value: Any,
+    right_value: Any,
+    preferred: str | None,
+) -> str:
+    left_number = _number_or_none(left_value)
+    right_number = _number_or_none(right_value)
+    if left_number is None or right_number is None or left_number == right_number:
+        return "tie" if left_number is not None and right_number is not None else "review"
+    if preferred == "higher":
+        return "left" if left_number > right_number else "right"
+    if preferred == "lower":
+        return "left" if left_number < right_number else "right"
+    return "review"
 
 
 def _quick_kpis(
@@ -509,13 +708,43 @@ def _quick_kpi(
     }
 
 
+
+def _preferred_for_metric(key: str) -> str:
+    if key in {"target_sdk", "min_sdk"}:
+        return "higher"
+    if key in {
+        "dangerous_permissions",
+        "location_permissions",
+        "storage_permissions",
+        "trackers",
+        "domains",
+        "urls",
+        "http_urls",
+        "high_findings",
+        "warning_findings",
+    }:
+        return "lower"
+    return "context"
+
+
+def _plain_metric_label(value: Any) -> str:
+    number = _number_or_none(value)
+    if number is None:
+        return "N/D"
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.1f}"
+
+
 def _metric_rows(
-    definitions: list[tuple[str, str]],
+    definitions: list[tuple[str, str] | tuple[str, str, str]],
     left_metrics: dict[str, float | None],
     right_metrics: dict[str, float | None],
 ) -> list[dict[str, Any]]:
     rows = []
-    for label, key in definitions:
+    for definition in definitions:
+        label, key = definition[0], definition[1]
+        preferred = definition[2] if len(definition) > 2 else _preferred_for_metric(key)
         left_value = left_metrics.get(key)
         right_value = right_metrics.get(key)
         if left_value is None and right_value is None:
@@ -524,6 +753,9 @@ def _metric_rows(
             "label": label,
             "left_value": left_value,
             "right_value": right_value,
+            "left_label": _plain_metric_label(left_value),
+            "right_label": _plain_metric_label(right_value),
+            "preferred": preferred,
         }
         left_examples = left_metrics.get(f"{key}_examples")
         right_examples = right_metrics.get(f"{key}_examples")
@@ -648,6 +880,76 @@ def _count_health_connect_permissions(value: Any) -> int:
         1
         for permission in permission_names
         if "health" in str(permission).lower()
+    )
+
+
+
+def _permission_diff(
+    left_report: dict[str, Any] | None,
+    right_report: dict[str, Any] | None,
+) -> dict[str, list[str]]:
+    left_permissions = set(_permission_names(left_report.get("permissions") if isinstance(left_report, dict) else None))
+    right_permissions = set(_permission_names(right_report.get("permissions") if isinstance(right_report, dict) else None))
+    return {
+        "added_in_left": sorted(left_permissions - right_permissions)[:50],
+        "removed_in_left": sorted(right_permissions - left_permissions)[:50],
+        "health_connect_permissions": sorted(
+            permission for permission in left_permissions if "health" in str(permission).lower()
+        )[:50],
+    }
+
+
+def _key_finding(finding: dict[str, Any]) -> dict[str, Any]:
+    title = finding.get("title") or "Hallazgo técnico"
+    summary = finding.get("description") or finding.get("detail") or title
+    return {
+        "title": title,
+        "severity": finding.get("severity"),
+        "category": _finding_category(title),
+        "affected_side": finding.get("affected_side"),
+        "summary": str(summary)[:500],
+        "mastg_relation": _mastg_relation_for_finding(title),
+        "relation_type": "inferred",
+        "masvs": finding.get("masvs"),
+        "cwe": finding.get("cwe"),
+    }
+
+
+def _finding_category(title: Any) -> str:
+    text = str(title).lower()
+    if "clear" in text or "traffic" in text or "http" in text or "network" in text:
+        return "Comunicaciones"
+    if "backup" in text or "storage" in text or "external" in text:
+        return "Almacenamiento"
+    if "webview" in text:
+        return "WebView"
+    if "crypto" in text or "ssl" in text or "tls" in text:
+        return "Criptografía"
+    if "log" in text:
+        return "Logging"
+    if "permission" in text:
+        return "Permisos"
+    return "Seguridad"
+
+
+def _mastg_relation_for_finding(title: Any) -> str | None:
+    text = str(title).lower()
+    if "clear" in text or "traffic" in text or "http" in text:
+        return "MASTG-TEST-0235"
+    if "backup" in text:
+        return "MASTG-TEST-0216"
+    if "webview" in text:
+        return "MASTG-TEST-0252"
+    if "crypto" in text or "ssl" in text or "tls" in text:
+        return "MASTG-TEST-0221"
+    return None
+
+
+def _count_permissions_matching(value: Any, needles: list[str]) -> int:
+    return sum(
+        1
+        for permission in _permission_names(value)
+        if any(needle in str(permission).lower() for needle in needles)
     )
 
 

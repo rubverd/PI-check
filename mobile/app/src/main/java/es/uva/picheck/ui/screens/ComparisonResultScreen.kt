@@ -55,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import es.uva.picheck.data.model.ComparisonDashboard
+import es.uva.picheck.data.model.DashboardVerdictCard
 import es.uva.picheck.data.model.DashboardHeader
 import es.uva.picheck.data.model.DashboardMetric
 import es.uva.picheck.data.model.PiCheckComparisonAnalysis
@@ -167,13 +168,9 @@ fun ComparisonResultScreen(
 
                         when (selectedTab) {
                             0 -> SummaryTab(dashboard)
-                            1 -> MetricsTab(
-                                title = "Privacidad",
-                                metrics = dashboard?.privacyMetrics.orEmpty(),
-                                emptyMessage = "No hay métricas de privacidad disponibles.",
-                            )
+                            1 -> PrivacyTab(dashboard)
                             2 -> SecurityTab(dashboard)
-                            3 -> MetricsTab(
+                            3 -> MetricsSection(
                                 title = "Exposición externa",
                                 metrics = dashboard?.exposureMetrics.orEmpty(),
                                 emptyMessage = "No hay métricas de exposición disponibles.",
@@ -237,21 +234,21 @@ private fun ComparisonHeaderCard(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 HeaderSide(
-                    title = header?.leftTitle ?: "Aplicación A",
-                    version = header?.leftVersion ?: fallback.appA.versionApp.version,
-                    integrationModel = header?.leftIntegrationModel ?: fallback.appA.versionApp.modeloIntegracion,
-                    mobsfStatus = header?.leftMobsfStatus ?: fallback.appA.versionApp.estadoMobsf,
-                    icon = header?.leftIcon,
-                    isHealthConnect = isHealthConnect(header?.leftIntegrationModel ?: fallback.appA.versionApp.modeloIntegracion),
+                    title = header?.left?.label ?: header?.leftTitle ?: "Aplicación A",
+                    version = header?.left?.version ?: header?.leftVersion ?: fallback.appA.versionApp.version,
+                    integrationModel = header?.left?.integrationModel ?: header?.leftIntegrationModel ?: fallback.appA.versionApp.modeloIntegracion,
+                    mobsfStatus = header?.left?.mobsfStatus ?: header?.leftMobsfStatus ?: fallback.appA.versionApp.estadoMobsf,
+                    icon = header?.left?.icon ?: header?.leftIcon,
+                    isHealthConnect = isHealthConnect(header?.left?.integrationModel ?: header?.leftIntegrationModel ?: fallback.appA.versionApp.modeloIntegracion),
                     modifier = Modifier.weight(1f),
                 )
                 HeaderSide(
-                    title = header?.rightTitle ?: "Aplicación B",
-                    version = header?.rightVersion ?: fallback.appB.versionApp.version,
-                    integrationModel = header?.rightIntegrationModel ?: fallback.appB.versionApp.modeloIntegracion,
-                    mobsfStatus = header?.rightMobsfStatus ?: fallback.appB.versionApp.estadoMobsf,
-                    icon = header?.rightIcon,
-                    isHealthConnect = isHealthConnect(header?.rightIntegrationModel ?: fallback.appB.versionApp.modeloIntegracion),
+                    title = header?.right?.label ?: header?.rightTitle ?: "Aplicación B",
+                    version = header?.right?.version ?: header?.rightVersion ?: fallback.appB.versionApp.version,
+                    integrationModel = header?.right?.integrationModel ?: header?.rightIntegrationModel ?: fallback.appB.versionApp.modeloIntegracion,
+                    mobsfStatus = header?.right?.mobsfStatus ?: header?.rightMobsfStatus ?: fallback.appB.versionApp.estadoMobsf,
+                    icon = header?.right?.icon ?: header?.rightIcon,
+                    isHealthConnect = isHealthConnect(header?.right?.integrationModel ?: header?.rightIntegrationModel ?: fallback.appB.versionApp.modeloIntegracion),
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -449,12 +446,65 @@ private fun ExecutiveSummaryCard(summary: List<String>) {
 
 @Composable
 private fun SummaryTab(dashboard: ComparisonDashboard?) {
-    val kpis = dashboard?.quickKpis.orEmpty()
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (kpis.isEmpty()) {
+    val verdictCards = dashboard?.verdictCards.orEmpty()
+    val fallbackKpis = dashboard?.quickKpis.orEmpty()
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (verdictCards.isEmpty() && fallbackKpis.isEmpty()) {
             EmptyState("No hay métricas resumidas disponibles.")
         } else {
-            kpis.forEach { kpi -> QuickKpiCard(kpi) }
+            verdictCards.forEach { card -> VerdictCard(card) }
+            fallbackKpis.forEach { kpi -> QuickKpiCard(kpi) }
+        }
+
+        MetricsSection(
+            title = "Plataforma Android",
+            metrics = dashboard?.platformMetrics.orEmpty(),
+            emptyMessage = "No hay métricas de plataforma disponibles.",
+        )
+    }
+}
+
+@Composable
+private fun VerdictCard(card: DashboardVerdictCard) {
+    val accent = when (card.status?.lowercase()) {
+        "positive" -> PiCheckHCGreen
+        "warning" -> Color(0xFFE09000)
+        "risk" -> PiCheckBurgundy
+        else -> PiCheckLegacyGray
+    }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, PiCheckCardBorder),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFBFCFF)),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = card.title,
+                    color = PiCheckDarkText,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = winnerLabel(card.winner),
+                    color = accent,
+                    fontWeight = FontWeight.ExtraBold,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                text = card.summary ?: "Sin resumen disponible.",
+                color = PiCheckDarkText.copy(alpha = 0.78f),
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
@@ -537,7 +587,81 @@ private fun KpiValueBox(
 }
 
 @Composable
-private fun MetricsTab(
+private fun PrivacyTab(dashboard: ComparisonDashboard?) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = "Health Connect puede aumentar el número de permisos declarados, pero introduce permisos más granulares para datos de salud.",
+            color = PiCheckDarkText.copy(alpha = 0.78f),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        MetricsSection(
+            title = "Privacidad y permisos",
+            metrics = dashboard?.privacyMetrics.orEmpty(),
+            emptyMessage = "No hay métricas de privacidad disponibles.",
+        )
+        dashboard?.permissionDiff?.let { diff ->
+            PermissionDiffCard(
+                added = diff.addedInLeft,
+                removed = diff.removedInLeft,
+                healthConnect = diff.healthConnectPermissions,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PermissionDiffCard(
+    added: List<String>,
+    removed: List<String>,
+    healthConnect: List<String>,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded },
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, PiCheckCardBorder),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFBFCFF)),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = "Diferencia de permisos",
+                color = PiCheckDarkText,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "Añadidos: ${added.size} · Eliminados: ${removed.size} · Health Connect: ${healthConnect.size}",
+                color = PiCheckDarkText.copy(alpha = 0.72f),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            AnimatedVisibility(visible = expanded) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    PermissionList("Añadidos en izquierda", added)
+                    PermissionList("Eliminados en izquierda", removed)
+                    PermissionList("Permisos Health Connect", healthConnect)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionList(title: String, values: List<String>) {
+    Text(
+        text = "$title: ${values.take(8).joinToString().ifBlank { "N/D" }}",
+        color = PiCheckDarkText,
+        style = MaterialTheme.typography.bodySmall,
+        maxLines = 4,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun MetricsSection(
     title: String,
     metrics: List<DashboardMetric>,
     emptyMessage: String,
@@ -555,10 +679,11 @@ private fun MetricsTab(
             metrics.forEach { metric ->
                 ComparisonBarMetric(
                     label = metric.label,
-                    leftLabel = valueLabel(metric.leftValue),
-                    rightLabel = valueLabel(metric.rightValue),
+                    leftLabel = metric.leftLabel ?: valueLabel(metric.leftValue),
+                    rightLabel = metric.rightLabel ?: valueLabel(metric.rightValue),
                     leftValue = metric.leftValue,
                     rightValue = metric.rightValue,
+                    preferred = metric.preferred,
                 )
             }
         }
@@ -572,14 +697,26 @@ private fun ComparisonBarMetric(
     rightLabel: String,
     leftValue: Float?,
     rightValue: Float?,
+    preferred: String?,
 ) {
     val maxValue = max(1f, max(leftValue ?: 0f, rightValue ?: 0f))
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = label,
-            color = PiCheckDarkText,
-            fontWeight = FontWeight.Bold,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = label,
+                color = PiCheckDarkText,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = preferredLabel(preferred),
+                color = PiCheckLegacyGray,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         BarRow("Izquierda", leftLabel, leftValue, maxValue, PiCheckHCBlue)
         BarRow("Derecha", rightLabel, rightValue, maxValue, PiCheckLegacyGray)
     }
@@ -640,10 +777,11 @@ private fun SecurityTab(dashboard: ComparisonDashboard?) {
             metrics.forEach { metric ->
                 ComparisonBarMetric(
                     label = metric.label,
-                    leftLabel = valueLabel(metric.leftValue),
-                    rightLabel = valueLabel(metric.rightValue),
+                    leftLabel = metric.leftLabel ?: valueLabel(metric.leftValue),
+                    rightLabel = metric.rightLabel ?: valueLabel(metric.rightValue),
                     leftValue = metric.leftValue,
                     rightValue = metric.rightValue,
+                    preferred = metric.preferred,
                 )
             }
         }
@@ -703,7 +841,11 @@ private fun ExpandableFindingCard(finding: TechnicalFinding) {
             )
             AnimatedVisibility(visible = expanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    finding.summary?.let { InfoLine("Resumen", it) }
                     finding.description?.let { InfoLine("Descripción", it) }
+                    finding.category?.let { InfoLine("Categoría", it) }
+                    finding.mastgRelation?.let { InfoLine("Relación MASTG", it) }
+                    finding.relationType?.let { InfoLine("Tipo relación", it) }
                     finding.detail?.let { InfoLine("Detalle", it) }
                     finding.masvs?.let { InfoLine("MASVS", it) }
                     finding.cwe?.let { InfoLine("CWE", it) }
@@ -719,9 +861,14 @@ private fun TechnicalTab(result: PiCheckComparisonAnalysis) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         InfoLine("Artefacto temporal", result.comparisonArtifactPath ?: "No generado")
         InfoLine("ID", result.comparisonId)
+        result.dashboard?.technicalSummary?.let { summary ->
+            InfoLine("Informe izquierdo", reportSummary(summary.leftReportAvailable, summary.leftReportSizeBytes))
+            InfoLine("Informe derecho", reportSummary(summary.rightReportAvailable, summary.rightReportSizeBytes))
+            InfoLine("Raw MobSF en respuesta", if (summary.rawReportInResponse == true) "Sí" else "No")
+        }
         JsonPreviewCard(
-            title = "JSON bruto de la respuesta",
-            json = result.rawJson,
+            title = "JSON resumido del dashboard",
+            json = result.comparisonJson ?: result.rawJson,
             expanded = showFullJson,
             onToggle = { showFullJson = !showFullJson },
         )
@@ -755,10 +902,16 @@ private fun JsonPreviewCard(
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
-    val visibleJson = if (expanded) {
-        json
+    val maxJsonChars = 50 * 1024
+    val sourceJson = if (json.length > maxJsonChars) {
+        json.take(maxJsonChars) + "\n\n... contenido truncado para proteger la UI ..."
     } else {
-        json.take(3000) + if (json.length > 3000) "\n\n... JSON truncado en vista previa ..." else ""
+        json
+    }
+    val visibleJson = if (expanded) {
+        sourceJson
+    } else {
+        sourceJson.take(3000) + if (sourceJson.length > 3000) "\n\n... JSON truncado en vista previa ..." else ""
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -835,6 +988,27 @@ private fun valueLabel(value: Float?): String = when {
     value == null -> "N/D"
     value % 1f == 0f -> value.toInt().toString()
     else -> "%.1f".format(value)
+}
+
+private fun winnerLabel(value: String?): String = when (value?.lowercase()) {
+    "left" -> "HC"
+    "right" -> "Legacy"
+    "tie" -> "Empate"
+    "pending" -> "Pendiente"
+    else -> "Revisión"
+}
+
+private fun preferredLabel(value: String?): String = when (value?.lowercase()) {
+    "higher" -> "mayor es mejor"
+    "lower" -> "menor es mejor"
+    "context" -> "contexto"
+    else -> "comparativo"
+}
+
+private fun reportSummary(available: Boolean?, sizeBytes: Long?): String {
+    val availability = if (available == true) "disponible" else "no disponible"
+    val size = sizeBytes?.let { " · ${it / 1024} KB" }.orEmpty()
+    return availability + size
 }
 
 private fun sideLabel(value: String?): String = when (value?.lowercase()) {
