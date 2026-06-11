@@ -487,6 +487,44 @@ object PiCheckApiClient {
             rawReportInResponse = optNullableBoolean("raw_report_in_response"),
         )
 
+    private fun JSONArray.toQuickKpis(): List<QuickKpi> =
+        List(length()) { index ->
+            val item = getJSONObject(index)
+            QuickKpi(
+                title = item.optString("title", "KPI"),
+                leftLabel = item.optNullableString("left_label"),
+                rightLabel = item.optNullableString("right_label"),
+                leftValue = item.optNullableFloat("left_value"),
+                rightValue = item.optNullableFloat("right_value"),
+                winner = item.optNullableString("winner"),
+                level = item.optNullableString("level"),
+            )
+        }
+
+    private fun JSONArray.toDashboardMetrics(): List<DashboardMetric> =
+        List(length()) { index ->
+            val item = getJSONObject(index)
+            DashboardMetric(
+                label = item.optString("label", "Métrica"),
+                leftValue = item.optNullableFloat("left_value"),
+                rightValue = item.optNullableFloat("right_value"),
+            )
+        }
+
+    private fun JSONArray.toTechnicalFindings(): List<TechnicalFinding> =
+        List(length()) { index ->
+            val item = getJSONObject(index)
+            TechnicalFinding(
+                title = item.optString("title", "Hallazgo técnico"),
+                severity = item.optNullableString("severity"),
+                affectedSide = item.optNullableString("affected_side"),
+                description = item.optNullableString("description"),
+                detail = item.optNullableString("detail"),
+                masvs = item.optNullableString("masvs"),
+                cwe = item.optNullableString("cwe"),
+            )
+        }
+
     private fun JSONObject.toPiCheckVersionReport(): PiCheckVersionReport =
         PiCheckVersionReport(
             versionApp = getJSONObject("version_app").toPiCheckVersionAppInfo(),
