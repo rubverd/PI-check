@@ -4,7 +4,7 @@ from collections import OrderedDict
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -116,6 +116,7 @@ def register_local_apk(
             run_mobsf=payload.run_mobsf,
             mobsf_report_available=mobsf_report_available,
             messages=messages,
+            request=request,
         )
 
     except (AppRegistrationError, AppAnalysisError) as exc:
@@ -134,6 +135,7 @@ def register_local_apk(
 
 @router.post("/upload-apk", response_model=RegisterLocalApkResponse)
 def upload_apk(
+    request: Request,
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
     developer: str | None = Form(default=None),
@@ -181,6 +183,7 @@ def upload_apk(
             run_mobsf=run_mobsf,
             mobsf_report_available=mobsf_report_available,
             messages=messages,
+            request=request,
         )
 
     except (AppRegistrationError, AppAnalysisError) as exc:
@@ -200,7 +203,7 @@ def upload_apk(
 
 
 @router.get("/registered", response_model=RegisteredAppsResponse)
-def get_registered_apps(db: Session = Depends(get_db_session)):
+def get_registered_apps(request: Request, db: Session = Depends(get_db_session)):
     rows = _get_all_registered_versions(db)
     grouped: OrderedDict[str, RegisteredAppItem] = OrderedDict()
 
@@ -233,7 +236,7 @@ def get_registered_apps(db: Session = Depends(get_db_session)):
 
 
 @router.get("/analyzed", response_model=AnalyzedAppsResponse)
-def get_analyzed_apps(db: Session = Depends(get_db_session)):
+def get_analyzed_apps(request: Request, db: Session = Depends(get_db_session)):
     rows = _get_latest_registered_versions(db)
     analyzed_rows = [
         (app, version) for app, version in rows if _has_mobsf_report(version)
@@ -290,6 +293,7 @@ def _local_apk_response(
     run_mobsf: bool,
     mobsf_report_available: bool,
     messages: list[str],
+    request: Request,
 ) -> RegisterLocalApkResponse:
     version_item = _version_to_registered_item(prepared.app_version)
     icon_url = build_public_artifact_url(prepared.application.icono)
@@ -429,6 +433,19 @@ def _has_mobsf_report(version: AppVersionModel) -> bool:
         and version.hash_mobsf
         and version.ruta_informe_mobsf
     )
+
+
+def _public_icon_url(icon: str | None, request: Request) -> str | None:
+    if not icon:
+        return None
+
+    if icon.startswith(("http://", "https://")):
+        return icon
+
+    if icon.startswith("/"):
+        return str(request.base_url).rstrip("/") + icon
+
+    return icon
 
 
 def _has_mobsf_report_domain(version) -> bool:
