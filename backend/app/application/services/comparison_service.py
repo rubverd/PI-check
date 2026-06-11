@@ -33,6 +33,7 @@ class ComparisonExecutionResult:
     comparison: ComparisonResult
     comparison_payload: dict[str, Any]
     dashboard_payload: dict[str, Any]
+    technical_summary: dict[str, Any]
     comparison_json: str
     comparison_artifact_path: str | None
 
@@ -121,9 +122,17 @@ class ComparisonService:
             report_b=report_b,
             comparison_payload=comparison_payload,
         )
+        technical_summary = _build_technical_summary(report_a, report_b)
+        artifact_path = _save_temporary_comparison_payload(
+            comparison_payload,
+            dashboard_payload,
+            technical_summary,
+        )
         response_artifact = {
             "comparison": comparison_payload,
             "dashboard": dashboard_payload,
+            "technical_summary": technical_summary,
+            "comparison_artifact_path": artifact_path,
         }
         comparison_json = json.dumps(
             response_artifact,
@@ -131,10 +140,10 @@ class ComparisonService:
             indent=2,
             default=str,
         )
-        artifact_path = _save_temporary_comparison_payload(comparison_payload, dashboard_payload)
 
-        messages.append("[COMPARISON] Comparativa estructurada generada a partir de informes MobSF.")
-        messages.append(f"[COMPARISON] Comparativa temporal guardada en {artifact_path}.")
+        messages.append("[COMPARISON] Comparativa resumida generada.")
+        messages.append(f"[COMPARISON] Artefacto temporal guardado en {artifact_path}.")
+        messages.append("[COMPARISON] Respuesta enviada sin informes MobSF completos.")
         logger.info(
             "[COMPARISON] Comparativa generada comparison_id=%s left=%s:%s right=%s:%s",
             comparison_id,
@@ -153,6 +162,7 @@ class ComparisonService:
             comparison=comparison,
             comparison_payload=comparison_payload,
             dashboard_payload=dashboard_payload,
+            technical_summary=technical_summary,
             comparison_json=comparison_json,
             comparison_artifact_path=artifact_path,
         )
@@ -196,7 +206,7 @@ def _build_comparison_payload(
             "left": _mobsf_summary(report_a),
             "right": _mobsf_summary(report_b),
         },
-        "raw_mobsf_highlights": {
+        "mobsf_highlights": {
             "left": _mobsf_highlights(left_report),
             "right": _mobsf_highlights(right_report),
         },
@@ -238,26 +248,30 @@ def _mobsf_highlights(report_data: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(report_data, dict):
         return {}
 
-    preferred_keys = [
-        "app_name",
-        "package_name",
-        "version_name",
-        "target_sdk",
-        "min_sdk",
-        "max_sdk",
-        "permissions",
-        "certificate_analysis",
-        "manifest_analysis",
-        "code_analysis",
-        "binary_analysis",
-        "security_score",
-        "trackers",
-        "domains",
-        "urls",
-        "emails",
-    ]
-    return {key: report_data[key] for key in preferred_keys if key in report_data}
+    urls = _collection_items(report_data.get("urls")) if "urls" in report_data else []
+    domains = _collection_items(report_data.get("domains")) if "domains" in report_data else []
+    trackers = _collection_items(report_data.get("trackers")) or _collection_items(
+        report_data.get("trackers_info")
+    )
+    permissions = report_data.get("permissions")
+    findings = _technical_findings(report_data, "summary")
 
+    return {
+        "app_name": _safe_scalar(report_data.get("app_name")),
+        "package_name": _safe_scalar(report_data.get("package_name")),
+        "version_name": _safe_scalar(report_data.get("version_name")),
+        "target_sdk": _safe_scalar(report_data.get("target_sdk")),
+        "min_sdk": _safe_scalar(report_data.get("min_sdk")),
+        "security_score": _safe_scalar(report_data.get("security_score")),
+        "total_permissions": _collection_count(permissions),
+        "total_trackers": len(trackers),
+        "total_domains": len(domains),
+        "total_urls": len(urls),
+        "total_findings": len(findings),
+        "domain_examples": _string_examples(domains),
+        "url_examples": _string_examples(urls),
+        "tracker_examples": _string_examples(trackers),
+    }
 
 
 def _build_dashboard_payload(
@@ -343,7 +357,7 @@ def _build_dashboard_payload(
         "privacy_metrics": privacy_metrics,
         "security_metrics": security_metrics,
         "exposure_metrics": exposure_metrics,
-        "technical_findings": technical_findings[:12],
+        "technical_findings": technical_findings[:20],
     }
 
 
@@ -389,6 +403,8 @@ def _extract_dashboard_metrics(report_data: dict[str, Any] | None) -> dict[str, 
         ]
     )
 
+    http_urls = [value for value in (urls or []) if str(value).lower().startswith("http://")]
+
     return {
         "target_sdk": _first_number(
             report_data,
@@ -403,17 +419,25 @@ def _extract_dashboard_metrics(report_data: dict[str, Any] | None) -> dict[str, 
         "trackers": float(len(trackers)) if trackers is not None else None,
         "domains": float(len(domains)) if domains is not None else None,
         "urls": float(len(urls)) if urls is not None else None,
-        "http_urls": float(
-            len([value for value in urls if str(value).lower().startswith("http://")])
-        )
-        if urls is not None
-        else None,
+        "http_urls": float(len(http_urls)) if urls is not None else None,
         "high_findings": float(_count_findings_by_severity(findings, "high"))
         if has_security_sections
         else None,
         "warning_findings": float(_count_findings_by_severity(findings, "warning"))
         if has_security_sections
         else None,
+        "trackers_examples": _string_examples(trackers or []),
+        "domains_examples": _string_examples(domains or []),
+        "urls_examples": _string_examples(urls or []),
+        "http_urls_examples": _string_examples(http_urls),
+        "permissions_examples": _string_examples(_permission_names(permissions)),
+        "findings_examples": [finding["title"] for finding in findings[:20]],
+        "total_trackers": len(trackers or []),
+        "total_domains": len(domains or []),
+        "total_urls": len(urls or []),
+        "total_http_urls": len(http_urls),
+        "total_permissions": _collection_count(permissions),
+        "total_findings": len(findings),
     }
 
 
@@ -496,13 +520,28 @@ def _metric_rows(
         right_value = right_metrics.get(key)
         if left_value is None and right_value is None:
             continue
-        rows.append(
-            {
-                "label": label,
-                "left_value": left_value,
-                "right_value": right_value,
-            }
-        )
+        row = {
+            "label": label,
+            "left_value": left_value,
+            "right_value": right_value,
+        }
+        left_examples = left_metrics.get(f"{key}_examples")
+        right_examples = right_metrics.get(f"{key}_examples")
+        if left_examples:
+            row["left_examples"] = left_examples
+        if right_examples:
+            row["right_examples"] = right_examples
+        total_left = left_metrics.get(f"total_{key}")
+        total_right = right_metrics.get(f"total_{key}")
+        if total_left is not None:
+            row["left_total"] = total_left
+        if total_right is not None:
+            row["right_total"] = total_right
+        if (left_examples and total_left and total_left > len(left_examples)) or (
+            right_examples and total_right and total_right > len(right_examples)
+        ):
+            row["examples_truncated"] = True
+        rows.append(row)
     return rows
 
 
@@ -678,7 +717,7 @@ def _finding_description(details: Any) -> str | None:
     if not isinstance(details, dict):
         return None
     value = details.get("description") or details.get("desc") or details.get("title")
-    return str(value) if value else None
+    return str(value)[:1000] if value else None
 
 
 def _finding_detail(details: Any) -> str | None:
@@ -687,7 +726,7 @@ def _finding_detail(details: Any) -> str | None:
     value = details.get("detail") or details.get("info") or details.get("files")
     if value is None:
         value = details.get("metadata")
-    return str(value) if value is not None else None
+    return str(value)[:1500] if value is not None else None
 
 
 def _finding_optional(details: Any, keys: list[str]) -> str | None:
@@ -696,13 +735,13 @@ def _finding_optional(details: Any, keys: list[str]) -> str | None:
     for key in keys:
         value = details.get(key)
         if value:
-            return str(value)
+            return str(value)[:300]
     metadata = details.get("metadata")
     if isinstance(metadata, dict):
         for key in keys:
             value = metadata.get(key)
             if value:
-                return str(value)
+                return str(value)[:300]
     return None
 
 
@@ -713,9 +752,71 @@ def _clean_finding_title(value: str) -> str:
 def _count_findings_by_severity(findings: list[dict[str, Any]], severity: str) -> int:
     return sum(1 for finding in findings if finding.get("severity", "").lower() == severity.lower())
 
+
+def _build_technical_summary(
+    report_a: VersionReport,
+    report_b: VersionReport,
+) -> dict[str, Any]:
+    return {
+        "left_report_available": report_a.mobsf_report is not None,
+        "right_report_available": report_b.mobsf_report is not None,
+        "left_report_size_bytes": _report_size_bytes(report_a),
+        "right_report_size_bytes": _report_size_bytes(report_b),
+        "left_report_keys": _report_keys(report_a),
+        "right_report_keys": _report_keys(report_b),
+        "left_report_path": report_a.version_app.ruta_informe_mobsf,
+        "right_report_path": report_b.version_app.ruta_informe_mobsf,
+    }
+
+
+def _report_size_bytes(report: VersionReport) -> int | None:
+    report_path = report.version_app.ruta_informe_mobsf
+    if not report_path:
+        return None
+    try:
+        return Path(report_path).stat().st_size
+    except OSError:
+        return None
+
+
+def _report_keys(report: VersionReport) -> list[str]:
+    json_report = report.mobsf_report.json_report if report.mobsf_report else None
+    if not isinstance(json_report, dict):
+        return []
+    return sorted(json_report.keys())[:50]
+
+
+def _safe_scalar(value: Any) -> Any:
+    if value is None or isinstance(value, (int, float, bool)):
+        return value
+    if isinstance(value, str):
+        return value[:300]
+    return str(value)[:300]
+
+
+def _string_examples(values: list[Any], limit: int = 20) -> list[str]:
+    return [str(value)[:500] for value in values[:limit]]
+
+
+def _collection_count(value: Any) -> int:
+    if isinstance(value, dict):
+        return len(value)
+    if isinstance(value, (list, tuple, set)):
+        return len(value)
+    return 0
+
+
+def _permission_names(value: Any) -> list[Any]:
+    if isinstance(value, dict):
+        return list(value.keys())
+    if isinstance(value, list):
+        return value
+    return []
+
 def _save_temporary_comparison_payload(
     payload: dict[str, Any],
     dashboard_payload: dict[str, Any],
+    technical_summary: dict[str, Any],
 ) -> str:
     output_dir = Path(os.getenv("COMPARISON_ARTIFACTS_DIR", "/app/artifacts/comparisons"))
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -733,6 +834,7 @@ def _save_temporary_comparison_payload(
     artifact_payload = {
         "comparison": payload,
         "dashboard": dashboard_payload,
+        "technical_summary": technical_summary,
     }
 
     with output_path.open("w", encoding="utf-8") as file:

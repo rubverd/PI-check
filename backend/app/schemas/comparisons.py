@@ -81,5 +81,6 @@ class ComparisonAnalysisResponse(BaseModel):
     id_indice_aplicado: Optional[str] = None
     comparison: dict[str, Any]
     dashboard: dict[str, Any] = Field(default_factory=dict)
+    technical_summary: dict[str, Any] = Field(default_factory=dict)
     comparison_json: str
     comparison_artifact_path: Optional[str] = None

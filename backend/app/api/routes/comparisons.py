@@ -74,6 +74,7 @@ def _to_response(
         id_indice_aplicado=result.comparison.id_indice_aplicado,
         comparison=result.comparison_payload,
         dashboard=result.dashboard_payload,
+        technical_summary=result.technical_summary,
         comparison_json=result.comparison_json,
         comparison_artifact_path=result.comparison_artifact_path,
     )
@@ -109,6 +110,6 @@ def _version_report_to_response(
             ruta_informe=mobsf_report.ruta_informe if mobsf_report else None,
             file_name=mobsf_report.file_name if mobsf_report else None,
             scan_type=mobsf_report.scan_type if mobsf_report else None,
-            json_report=mobsf_report.json_report if mobsf_report else None,
+            json_report=None,
         ),
     )

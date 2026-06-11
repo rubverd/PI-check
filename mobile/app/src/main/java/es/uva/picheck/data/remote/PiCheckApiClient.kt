@@ -20,7 +20,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.DataOutputStream
 import java.io.File
 import java.io.FileInputStream
@@ -41,6 +42,7 @@ object PiCheckApiClient {
     }
 
     private val BASE_URL = ApiEnvironment.BASE_URL
+    private const val MAX_RESPONSE_BODY_BYTES = 10 * 1024 * 1024
 
     suspend fun searchApps(query: String): List<PlayStoreApp> = withContext(Dispatchers.IO) {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
@@ -219,8 +221,36 @@ object PiCheckApiClient {
 
     private fun HttpURLConnection.readResponse(): String {
         val responseCode = responseCode
+        val declaredLength = contentLength
+        if (declaredLength > MAX_RESPONSE_BODY_BYTES) {
+            disconnect()
+            throw IOException(
+                "La respuesta del servidor es demasiado grande " +
+                    "(${declaredLength / (1024 * 1024)} MB). La comparativa debe generarse como resumen.",
+            )
+        }
+
         val stream = if (responseCode in 200..299) inputStream else errorStream
-        val response = stream.bufferedReader().use(BufferedReader::readText)
+        val response = stream?.use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var totalRead = 0
+
+            while (true) {
+                val read = input.read(buffer)
+                if (read == -1) break
+                totalRead += read
+                if (totalRead > MAX_RESPONSE_BODY_BYTES) {
+                    throw IOException(
+                        "La respuesta del servidor es demasiado grande. " +
+                            "La comparativa debe generarse como resumen.",
+                    )
+                }
+                output.write(buffer, 0, read)
+            }
+
+            output.toString(Charsets.UTF_8.name())
+        }.orEmpty()
 
         disconnect()
 
