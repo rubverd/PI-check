@@ -30,7 +30,7 @@ Options:
   --help             Show this help.
 
 Useful variables:
-  PUBLIC_DNS, PUBLIC_IP, VM_IP, PICHECK_HTTPS_PORT, POSTGRES_PASSWORD, MOBSF_API_KEY
+  PUBLIC_DNS, PUBLIC_IP, VM_IP, PICHECK_HTTPS_PORT, PICHECK_PUBLIC_BASE_URL, POSTGRES_PASSWORD, MOBSF_API_KEY
   POSTGRES_USER, POSTGRES_DB, MAX_UPLOAD_APK_SIZE_MB, CA_DIR, CERT_DAYS, SERVER_CN, EXTRA_DNS, EXTRA_IP, SAN_LIST
 USAGE
 }
@@ -66,6 +66,7 @@ PUBLIC_DNS="${PUBLIC_DNS:-virtual.lab.inf.uva.es}"
 PUBLIC_IP="${PUBLIC_IP:-157.88.125.240}"
 VM_IP="${VM_IP:-10.0.20.49}"
 PICHECK_HTTPS_PORT="${PICHECK_HTTPS_PORT:-8443}"
+PICHECK_PUBLIC_BASE_URL="${PICHECK_PUBLIC_BASE_URL:-https://${PUBLIC_DNS}:${PICHECK_HTTPS_PORT}}"
 POSTGRES_USER="${POSTGRES_USER:-picheck}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-picheck}"
 POSTGRES_DB="${POSTGRES_DB:-picheck}"
@@ -80,6 +81,7 @@ ARTIFACT_DIRS=(
   "backend/artifacts/tmp/apks"
   "backend/artifacts/tmp/uploads"
   "backend/artifacts/apks"
+  "backend/artifacts/comparisons"
   "backend/artifacts/reports/mobsf"
   "backend/artifacts/reports/mastg"
   "backend/artifacts/reports/comparisons"
@@ -221,11 +223,13 @@ if [[ "$SKIP_ENV" != "true" ]]; then
     set_env_value "$ENV_FILE" "DATABASE_URL" "$DATABASE_URL"
     set_env_value "$ENV_FILE" "MOBSF_API_KEY" "$MOBSF_API_KEY"
     set_env_value "$ENV_FILE" "PICHECK_HTTPS_PORT" "$PICHECK_HTTPS_PORT"
+    set_env_value "$ENV_FILE" "PICHECK_PUBLIC_BASE_URL" "$PICHECK_PUBLIC_BASE_URL"
     set_env_value "$ENV_FILE" "APK_STORAGE_DIR" "/app/artifacts/apks"
     set_env_value "$ENV_FILE" "APK_UPLOAD_STAGING_DIR" "/app/artifacts/tmp/uploads"
     set_env_value "$ENV_FILE" "MAX_UPLOAD_APK_SIZE_MB" "$MAX_UPLOAD_APK_SIZE_MB"
     set_env_value "$ENV_FILE" "MOBSF_ANALYSIS_MODE" "${MOBSF_ANALYSIS_MODE:-sync}"
     set_env_value "$ENV_FILE" "MOBSF_MAX_PARALLEL_ANALYSES" "${MOBSF_MAX_PARALLEL_ANALYSES:-2}"
+    set_env_value "$ENV_FILE" "COMPARISON_ARTIFACTS_DIR" "/app/artifacts/comparisons"
   fi
 else
   echo "[ENV] Skipping .env creation/update because --skip-env/SKIP_ENV=true was provided"
