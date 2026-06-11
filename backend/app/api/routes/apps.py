@@ -16,6 +16,7 @@ from app.application.services.app_registration_service import (
     AppRegistrationError,
     AppRegistrationService,
 )
+from app.core.public_urls import build_public_artifact_url
 from app.domain.value_objects.mobsf_analysis_status import MobSFAnalysisStatus
 from app.infrastructure.database.session import get_db_session
 from app.infrastructure.external.google_play_client import (
@@ -78,26 +79,26 @@ def search_apps(
 
 @router.post("/register-local-apk", response_model=RegisterLocalApkResponse)
 def register_local_apk(
-    request: RegisterLocalApkRequest,
+    payload: RegisterLocalApkRequest,
     db: Session = Depends(get_db_session),
 ):
     logger.info(
         "[MANUAL_APK] Solicitud de registro local recibida: apk_path=%s run_mobsf=%s source=%s",
-        request.apk_path,
-        request.run_mobsf,
-        request.source_label,
+        payload.apk_path,
+        payload.run_mobsf,
+        payload.source_label,
     )
 
     registration_service = AppRegistrationService(db)
     try:
         prepared = registration_service.register_local_apk(
-            apk_path=request.apk_path,
-            title=request.title,
-            developer=request.developer,
-            category=request.category,
-            icon=request.icon,
-            source_label=request.source_label,
-            version_date=request.version_date,
+            apk_path=payload.apk_path,
+            title=payload.title,
+            developer=payload.developer,
+            category=payload.category,
+            icon=payload.icon,
+            source_label=payload.source_label,
+            version_date=payload.version_date,
         )
         db.commit()
         logger.info(
@@ -107,20 +108,15 @@ def register_local_apk(
         )
         messages, mobsf_report_available = _maybe_run_mobsf(
             prepared=prepared,
-            run_mobsf=request.run_mobsf,
+            run_mobsf=payload.run_mobsf,
             db=db,
         )
         return _local_apk_response(
             prepared=prepared,
-            run_mobsf=request.run_mobsf,
+            run_mobsf=payload.run_mobsf,
             mobsf_report_available=mobsf_report_available,
             messages=messages,
         )
-
-    except (AppRegistrationError, AppAnalysisError) as exc:
-        db.rollback()
-        logger.exception("Error controlado registrando APK local")
-        raise HTTPException(status_code=422, detail=str(exc))
 
     except (AppRegistrationError, AppAnalysisError) as exc:
         db.rollback()
@@ -216,7 +212,7 @@ def get_registered_apps(db: Session = Depends(get_db_session)):
                 app_id=app.id_app,
                 name=app.nombre,
                 developer=app.desarrollador,
-                icon=app.icono,
+                icon=build_public_artifact_url(app.icono),
                 category=app.categoria or version.categoria or "",
                 versions=[],
                 version=version_item.version,
@@ -248,7 +244,7 @@ def get_analyzed_apps(db: Session = Depends(get_db_session)):
             app_id=app.id_app,
             name=app.nombre,
             developer=app.desarrollador,
-            icon=app.icono,
+            icon=build_public_artifact_url(app.icono),
             version=version.version,
             category=app.categoria or version.categoria or "",
             analysis_date=(
@@ -296,11 +292,12 @@ def _local_apk_response(
     messages: list[str],
 ) -> RegisterLocalApkResponse:
     version_item = _version_to_registered_item(prepared.app_version)
+    icon_url = build_public_artifact_url(prepared.application.icono)
     app_item = RegisteredAppItem(
         app_id=prepared.application.id_app,
         name=prepared.application.nombre,
         developer=prepared.application.desarrollador,
-        icon=prepared.application.icono,
+        icon=icon_url,
         category=prepared.application.categoria or prepared.app_version.categoria or "",
         versions=[version_item],
         version=version_item.version,
@@ -314,13 +311,28 @@ def _local_apk_response(
         ruta_apk=version_item.ruta_apk,
     )
 
+    already_registered = prepared.version_already_registered
+    message = (
+        "La aplicación ya tiene esta versión registrada en el sistema."
+        if already_registered
+        else "APK registrado correctamente."
+    )
+
     return RegisterLocalApkResponse(
         app=app_item,
         version=version_item,
         run_mobsf=run_mobsf,
         mobsf_report_available=mobsf_report_available,
-        already_registered=prepared.version_already_registered,
-        messages=messages,
+        already_registered=already_registered,
+        id_app=app_item.app_id,
+        package_name=app_item.app_id,
+        app_name=app_item.name,
+        version_name=version_item.version,
+        icon=icon_url,
+        ruta_apk=version_item.ruta_apk,
+        estado_mobsf=version_item.mobsf_status,
+        message=message,
+        messages=[message, *messages] if message not in messages else messages,
     )
 
 

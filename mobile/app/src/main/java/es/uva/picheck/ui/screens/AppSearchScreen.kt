@@ -58,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -66,7 +67,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import es.uva.picheck.data.local.getInstalledDeviceApps
 import es.uva.picheck.data.model.AnalyzedApp
+import es.uva.picheck.data.model.DeviceAppInfo
 import es.uva.picheck.data.model.IntegrationModel
 import es.uva.picheck.data.model.PlayStoreApp
 import es.uva.picheck.data.model.RegisteredAppVersion
@@ -75,10 +78,20 @@ import es.uva.picheck.ui.theme.PiCheckBackground
 import es.uva.picheck.ui.theme.PiCheckBlue
 import es.uva.picheck.ui.theme.PiCheckBurgundy
 import es.uva.picheck.ui.theme.PiCheckCardBorder
+import es.uva.picheck.ui.theme.PiCheckHCBlue
+import es.uva.picheck.ui.theme.PiCheckHCCyan
+import es.uva.picheck.ui.theme.PiCheckHCGreen
+import es.uva.picheck.ui.theme.PiCheckHCHint
+import es.uva.picheck.ui.theme.PiCheckLegacyBg
+import es.uva.picheck.ui.theme.PiCheckLegacyDark
+import es.uva.picheck.ui.theme.PiCheckLegacyGray
 import es.uva.picheck.ui.theme.PiCheckDarkText
 import es.uva.picheck.data.model.PiCheckComparisonAnalysis
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 private val ElectricBlue = Color(0xFF2D5BFF)
 
@@ -112,6 +125,9 @@ fun AppSearchScreen() {
     var showDownloadProgress by remember { mutableStateOf(false) }
     var selectedUploadUri by remember { mutableStateOf<Uri?>(null) }
     var selectedUploadName by remember { mutableStateOf<String?>(null) }
+    var deviceApps by remember { mutableStateOf<List<DeviceAppInfo>>(emptyList()) }
+    var isLoadingDeviceApps by remember { mutableStateOf(false) }
+    var deviceAppsStatus by remember { mutableStateOf("Cargando aplicaciones instaladas...") }
     var isUploadingApk by remember { mutableStateOf(false) }
     var uploadStatus by remember { mutableStateOf("Esperando selección de APK/XAPK/APKS/APKM.") }
 
@@ -200,6 +216,28 @@ fun AppSearchScreen() {
 
     LaunchedEffect(Unit) {
         refreshRegisteredApps(showLoadingIndicator = true)
+    }
+
+    LaunchedEffect(currentMode) {
+        if (currentMode == AppListMode.UPLOAD && deviceApps.isEmpty() && !isLoadingDeviceApps) {
+            isLoadingDeviceApps = true
+            deviceAppsStatus = "Leyendo aplicaciones instaladas..."
+
+            try {
+                deviceApps = withContext(Dispatchers.IO) {
+                    getInstalledDeviceApps(context)
+                }
+                deviceAppsStatus = if (deviceApps.isEmpty()) {
+                    "No se encontraron aplicaciones instaladas con launcher."
+                } else {
+                    "Aplicaciones instaladas disponibles: ${deviceApps.size}"
+                }
+            } catch (exception: Exception) {
+                deviceAppsStatus = "No se pudieron cargar las aplicaciones instaladas: ${exception.message}"
+            } finally {
+                isLoadingDeviceApps = false
+            }
+        }
     }
 
     LaunchedEffect(currentMode) {
@@ -478,7 +516,53 @@ fun AppSearchScreen() {
                                         }
 
                                         item {
-                                            InstalledAppsExperimentalCard()
+                                            SectionTitle(text = "O seleccionar app instalada en el móvil")
+                                        }
+
+                                        if (isLoadingDeviceApps) {
+                                            item {
+                                                LoadingCard(message = "Cargando aplicaciones instaladas...")
+                                            }
+                                        }
+
+                                        if (!isLoadingDeviceApps && deviceApps.isEmpty()) {
+                                            item {
+                                                EmptySearchCard(message = deviceAppsStatus)
+                                            }
+                                        }
+
+                                        if (!isLoadingDeviceApps && deviceApps.isNotEmpty()) {
+                                            items(deviceApps, key = { it.packageName }) { deviceApp ->
+                                                DeviceAppCard(
+                                                    app = deviceApp,
+                                                    isUploading = isUploadingApk,
+                                                    onUpload = {
+                                                        coroutineScope.launch {
+                                                            isUploadingApk = true
+                                                            uploadStatus = "Subiendo APK base de ${deviceApp.name}..."
+
+                                                            try {
+                                                                val result = PiCheckApiClient.uploadApkFile(
+                                                                    file = File(deviceApp.sourceDir),
+                                                                    fileName = "${deviceApp.packageName}.apk",
+                                                                    title = deviceApp.name,
+                                                                )
+                                                                uploadStatus = if (result.contains("ya estaba registrada")) {
+                                                                    "La versión ya estaba registrada: $result"
+                                                                } else {
+                                                                    "APK registrado correctamente: $result"
+                                                                }
+                                                                refreshRegisteredApps(showLoadingIndicator = true)
+                                                                currentMode = AppListMode.REGISTERED
+                                                            } catch (exception: Exception) {
+                                                                uploadStatus = "Error al subir ${deviceApp.name}: ${exception.message}"
+                                                            } finally {
+                                                                isUploadingApk = false
+                                                            }
+                                                        }
+                                                    },
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -711,31 +795,108 @@ private fun UploadApkCard(
 }
 
 @Composable
-private fun InstalledAppsExperimentalCard() {
+private fun DeviceAppCard(
+    app: DeviceAppInfo,
+    isUploading: Boolean,
+    onUpload: () -> Unit,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, PiCheckCardBorder),
         colors = CardDefaults.cardColors(containerColor = Color.White),
     ) {
-        Column(
+        Row(
             modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = "Extraer APK instalada",
-                color = PiCheckDarkText,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Funcionalidad experimental documentada: se prioriza la subida segura desde archivo. Las apps instaladas pueden usar split APKs y restricciones de visibilidad en Android 11+.",
-                color = PiCheckDarkText,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text = "Futura mejora: listar apps lanzables, detectar sourceDir/splitSourceDirs y subir solo APK base simple o empaquetar splits de forma explícita.",
-                color = PiCheckDarkText,
-                style = MaterialTheme.typography.bodySmall,
+            DeviceAppIcon(app = app, size = 52)
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = app.name,
+                    color = PiCheckDarkText,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = app.packageName,
+                    color = PiCheckDarkText.copy(alpha = 0.75f),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                if (app.splitSourceDirs.isNotEmpty()) {
+                    Text(
+                        text = "App con split APKs: se subirá el APK base",
+                        color = PiCheckBurgundy,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    // TODO: subir base + splits como archivo compuesto (XAPK/APKS) en una iteración futura.
+                }
+            }
+
+            Button(
+                onClick = onUpload,
+                enabled = !isUploading,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PiCheckBlue,
+                    contentColor = Color.White,
+                ),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Subir")
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun DeviceAppIcon(
+    app: DeviceAppInfo,
+    size: Int = 52,
+) {
+    val context = LocalContext.current
+    var iconDrawable by remember(app.packageName) {
+        mutableStateOf<android.graphics.drawable.Drawable?>(null)
+    }
+
+    LaunchedEffect(app.packageName) {
+        val drawable = withContext(Dispatchers.IO) {
+            try {
+                context.packageManager.getApplicationIcon(app.packageName)
+            } catch (exception: Exception) {
+                null
+            }
+        }
+
+        iconDrawable = drawable
+    }
+
+    Box(
+        modifier = Modifier
+            .size(size.dp)
+            .background(PiCheckBlue, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = app.name.firstOrNull()?.uppercase() ?: "?",
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+        )
+
+        if (iconDrawable != null) {
+            AsyncImage(
+                model = iconDrawable,
+                contentDescription = "Icono de ${app.name}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(size.dp)
+                    .clip(CircleShape),
             )
         }
     }
@@ -976,48 +1137,83 @@ private fun RegisteredVersionRow(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
+    val isHC = version.integrationModel == IntegrationModel.HEALTH_CONNECT
+    val isLegacy = version.integrationModel == IntegrationModel.LEGACY
+    val backgroundColor = when {
+        isSelected && isHC -> Color(0xFFE3EAFF)
+        isSelected -> Color(0xFFE2E8F0)
+        isHC -> PiCheckHCHint
+        isLegacy -> PiCheckLegacyBg
+        else -> Color(0xFFF8F8FB)
+    }
+    val primaryTextColor = if (isLegacy) PiCheckLegacyDark else PiCheckDarkText
+    val secondaryTextColor = when {
+        isHC -> PiCheckDarkText.copy(alpha = 0.82f)
+        isLegacy -> PiCheckLegacyGray
+        else -> PiCheckDarkText.copy(alpha = 0.78f)
+    }
+    val analysisColor = when {
+        isHC -> PiCheckHCBlue
+        isLegacy -> PiCheckLegacyGray
+        else -> PiCheckDarkText
+    }
+    val hcGradient = Brush.linearGradient(
+        colors = listOf(PiCheckHCBlue, PiCheckHCCyan, PiCheckHCGreen),
+    )
+    val labelText = version.integrationModelShort.ifBlank { version.integrationModel.shortLabel() }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (isSelected) PiCheckBackground else Color(0xFFF8F8FB))
+            .background(backgroundColor)
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = "Versión ${version.version}",
-                color = PiCheckDarkText,
-                fontWeight = FontWeight.SemiBold,
+                color = primaryTextColor,
+                fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = "Fecha: ${version.versionDateLabel()}",
-                color = PiCheckDarkText,
+                color = secondaryTextColor,
                 style = MaterialTheme.typography.bodySmall,
             )
             Text(
                 text = version.analysisLabel(),
-                color = PiCheckDarkText,
+                color = analysisColor,
                 style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (isHC) FontWeight.Medium else FontWeight.Normal,
             )
         }
 
-        Text(
-            text = version.integrationModelShort.ifBlank { version.integrationModel.shortLabel() },
-            color = ElectricBlue,
-            fontWeight = FontWeight.ExtraBold,
-            style = MaterialTheme.typography.titleMedium,
-        )
+        if (isHC) {
+            Text(
+                text = labelText,
+                fontWeight = FontWeight.ExtraBold,
+                style = MaterialTheme.typography.titleLarge.copy(brush = hcGradient),
+            )
+        } else {
+            Text(
+                text = labelText,
+                color = if (isLegacy) PiCheckLegacyDark else ElectricBlue,
+                fontWeight = if (isLegacy) FontWeight.Black else FontWeight.ExtraBold,
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
 
         if (isSelected) {
             Text(
                 text = "✓",
                 color = PiCheckBurgundy,
                 fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium,
             )
         }
     }

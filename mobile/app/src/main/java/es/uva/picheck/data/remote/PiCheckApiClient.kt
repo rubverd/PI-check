@@ -3,6 +3,12 @@ package es.uva.picheck.data.remote
 import android.content.Context
 import android.net.Uri
 import es.uva.picheck.data.model.AnalyzedApp
+import es.uva.picheck.data.model.ComparisonDashboard
+import es.uva.picheck.data.model.DashboardHeader
+import es.uva.picheck.data.model.DashboardMetric
+import es.uva.picheck.data.model.MastgScore
+import es.uva.picheck.data.model.QuickKpi
+import es.uva.picheck.data.model.TechnicalFinding
 import es.uva.picheck.data.model.PiCheckComparisonAnalysis
 import es.uva.picheck.data.model.IntegrationModel
 import es.uva.picheck.data.model.PiCheckMobSFReport
@@ -14,8 +20,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.DataOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.InputStream
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URLEncoder
@@ -32,6 +42,7 @@ object PiCheckApiClient {
     }
 
     private val BASE_URL = ApiEnvironment.BASE_URL
+    private const val MAX_RESPONSE_BODY_BYTES = 10 * 1024 * 1024
 
     suspend fun searchApps(query: String): List<PlayStoreApp> = withContext(Dispatchers.IO) {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
@@ -78,6 +89,45 @@ object PiCheckApiClient {
         category: String? = null,
         sourceLabel: String = "mobile_upload",
         runMobsf: Boolean = false,
+    ): String = uploadApkMultipart(
+        fileName = fileName,
+        title = title,
+        developer = developer,
+        category = category,
+        sourceLabel = sourceLabel,
+        runMobsf = runMobsf,
+        openInputStream = { context.contentResolver.openInputStream(uri) },
+        missingFileMessage = "No se pudo abrir el APK seleccionado",
+    )
+
+    suspend fun uploadApkFile(
+        file: File,
+        fileName: String,
+        title: String? = null,
+        developer: String? = null,
+        category: String? = null,
+        sourceLabel: String = "mobile_installed_app",
+        runMobsf: Boolean = false,
+    ): String = uploadApkMultipart(
+        fileName = fileName,
+        title = title,
+        developer = developer,
+        category = category,
+        sourceLabel = sourceLabel,
+        runMobsf = runMobsf,
+        openInputStream = { FileInputStream(file) },
+        missingFileMessage = "No se pudo abrir el APK instalado",
+    )
+
+    private suspend fun uploadApkMultipart(
+        fileName: String,
+        title: String?,
+        developer: String?,
+        category: String?,
+        sourceLabel: String,
+        runMobsf: Boolean,
+        openInputStream: () -> InputStream?,
+        missingFileMessage: String,
     ): String = withContext(Dispatchers.IO) {
         val boundary = "----PiCheckBoundary${System.currentTimeMillis()}"
         val connection = (URL("$BASE_URL/api/apps/upload-apk").openConnection() as HttpURLConnection).apply {
@@ -95,7 +145,7 @@ object PiCheckApiClient {
             output.writeFormField(boundary, "category", category.orEmpty())
             output.writeFormField(boundary, "source_label", sourceLabel)
             output.writeFormField(boundary, "run_mobsf", runMobsf.toString())
-            output.writeFileField(context, uri, boundary, "file", fileName)
+            output.writeFileField(boundary, "file", fileName, openInputStream, missingFileMessage)
             output.writeBytes("--$boundary--\r\n")
             output.flush()
         }
@@ -118,11 +168,11 @@ object PiCheckApiClient {
     }
 
     private fun DataOutputStream.writeFileField(
-        context: Context,
-        uri: Uri,
         boundary: String,
         fieldName: String,
         fileName: String,
+        openInputStream: () -> InputStream?,
+        missingFileMessage: String,
     ) {
         writeBytes("--$boundary\r\n")
         writeBytes(
@@ -130,14 +180,14 @@ object PiCheckApiClient {
         )
         writeBytes("Content-Type: application/vnd.android.package-archive\r\n\r\n")
 
-        context.contentResolver.openInputStream(uri)?.use { input ->
+        openInputStream()?.use { input ->
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             while (true) {
                 val read = input.read(buffer)
                 if (read == -1) break
                 write(buffer, 0, read)
             }
-        } ?: throw IllegalStateException("No se pudo abrir el APK seleccionado")
+        } ?: throw IllegalStateException(missingFileMessage)
 
         writeBytes("\r\n")
     }
@@ -171,8 +221,36 @@ object PiCheckApiClient {
 
     private fun HttpURLConnection.readResponse(): String {
         val responseCode = responseCode
+        val declaredLength = contentLength
+        if (declaredLength > MAX_RESPONSE_BODY_BYTES) {
+            disconnect()
+            throw IOException(
+                "La respuesta del servidor es demasiado grande " +
+                    "(${declaredLength / (1024 * 1024)} MB). La comparativa debe generarse como resumen.",
+            )
+        }
+
         val stream = if (responseCode in 200..299) inputStream else errorStream
-        val response = stream.bufferedReader().use(BufferedReader::readText)
+        val response = stream?.use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var totalRead = 0
+
+            while (true) {
+                val read = input.read(buffer)
+                if (read == -1) break
+                totalRead += read
+                if (totalRead > MAX_RESPONSE_BODY_BYTES) {
+                    throw IOException(
+                        "La respuesta del servidor es demasiado grande. " +
+                            "La comparativa debe generarse como resumen.",
+                    )
+                }
+                output.write(buffer, 0, read)
+            }
+
+            output.toString(Charsets.UTF_8.name())
+        }.orEmpty()
 
         disconnect()
 
@@ -258,7 +336,82 @@ object PiCheckApiClient {
             appB = getJSONObject("app_b").toPiCheckVersionReport(),
             idIndiceAplicado = optNullableString("id_indice_aplicado"),
             rawJson = toString(2),
+            comparisonJson = optNullableString("comparison_json")
+                ?: optNullableJsonAsPrettyString("comparison"),
+            dashboard = optJSONObject("dashboard")?.toComparisonDashboard(),
+            comparisonArtifactPath = optNullableString("comparison_artifact_path"),
         )
+
+
+    private fun JSONObject.toComparisonDashboard(): ComparisonDashboard =
+        ComparisonDashboard(
+            mastgScore = optJSONObject("mastg_score")?.let {
+                MastgScore(
+                    left = it.optNullableFloat("left"),
+                    right = it.optNullableFloat("right"),
+                    status = it.optNullableString("status"),
+                )
+            },
+            header = optJSONObject("header")?.let {
+                DashboardHeader(
+                    appName = it.optNullableString("app_name"),
+                    leftTitle = it.optNullableString("left_title"),
+                    rightTitle = it.optNullableString("right_title"),
+                    leftVersion = it.optNullableString("left_version"),
+                    rightVersion = it.optNullableString("right_version"),
+                    leftIntegrationModel = it.optNullableString("left_integration_model"),
+                    rightIntegrationModel = it.optNullableString("right_integration_model"),
+                    leftMobsfStatus = it.optNullableString("left_mobsf_status"),
+                    rightMobsfStatus = it.optNullableString("right_mobsf_status"),
+                    leftIcon = it.optNullableString("left_icon"),
+                    rightIcon = it.optNullableString("right_icon"),
+                )
+            },
+            executiveSummary = optJSONArray("executive_summary")?.toStringList().orEmpty(),
+            quickKpis = optJSONArray("quick_kpis")?.toQuickKpis().orEmpty(),
+            privacyMetrics = optJSONArray("privacy_metrics")?.toDashboardMetrics().orEmpty(),
+            securityMetrics = optJSONArray("security_metrics")?.toDashboardMetrics().orEmpty(),
+            exposureMetrics = optJSONArray("exposure_metrics")?.toDashboardMetrics().orEmpty(),
+            technicalFindings = optJSONArray("technical_findings")?.toTechnicalFindings().orEmpty(),
+        )
+
+    private fun JSONArray.toQuickKpis(): List<QuickKpi> =
+        List(length()) { index ->
+            val item = getJSONObject(index)
+            QuickKpi(
+                title = item.optString("title", "KPI"),
+                leftLabel = item.optNullableString("left_label"),
+                rightLabel = item.optNullableString("right_label"),
+                leftValue = item.optNullableFloat("left_value"),
+                rightValue = item.optNullableFloat("right_value"),
+                winner = item.optNullableString("winner"),
+                level = item.optNullableString("level"),
+            )
+        }
+
+    private fun JSONArray.toDashboardMetrics(): List<DashboardMetric> =
+        List(length()) { index ->
+            val item = getJSONObject(index)
+            DashboardMetric(
+                label = item.optString("label", "Métrica"),
+                leftValue = item.optNullableFloat("left_value"),
+                rightValue = item.optNullableFloat("right_value"),
+            )
+        }
+
+    private fun JSONArray.toTechnicalFindings(): List<TechnicalFinding> =
+        List(length()) { index ->
+            val item = getJSONObject(index)
+            TechnicalFinding(
+                title = item.optString("title", "Hallazgo técnico"),
+                severity = item.optNullableString("severity"),
+                affectedSide = item.optNullableString("affected_side"),
+                description = item.optNullableString("description"),
+                detail = item.optNullableString("detail"),
+                masvs = item.optNullableString("masvs"),
+                cwe = item.optNullableString("cwe"),
+            )
+        }
 
     private fun JSONObject.toPiCheckVersionReport(): PiCheckVersionReport =
         PiCheckVersionReport(
@@ -335,6 +488,9 @@ object PiCheckApiClient {
 
     private fun JSONObject.optNullableInt(name: String): Int? =
         if (!has(name) || isNull(name)) null else optInt(name)
+
+    private fun JSONObject.optNullableFloat(name: String): Float? =
+        if (!has(name) || isNull(name)) null else optDouble(name).toFloat()
 
     private fun JSONObject.optNullableJsonAsPrettyString(name: String): String? {
         if (!has(name) || isNull(name)) {

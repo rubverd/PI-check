@@ -8,5 +8,8 @@ data class PiCheckComparisonAnalysis(
     val appA: PiCheckVersionReport,
     val appB: PiCheckVersionReport,
     val rawJson: String,
+    val comparisonJson: String? = null,
+    val dashboard: ComparisonDashboard? = null,
+    val comparisonArtifactPath: String? = null,
     val idIndiceAplicado: String? = null,
 )
