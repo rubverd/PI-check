@@ -120,12 +120,12 @@ fun ComparisonResultScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     MastgGauge(
-                        title = dashboard?.header?.leftTitle ?: "Izquierda",
+                        title = sideDisplayName(dashboard, left = true),
                         score = dashboard?.mastgScore?.left,
                         modifier = Modifier.weight(1f),
                     )
                     MastgGauge(
-                        title = dashboard?.header?.rightTitle ?: "Derecha",
+                        title = sideDisplayName(dashboard, left = false),
                         score = dashboard?.mastgScore?.right,
                         modifier = Modifier.weight(1f),
                     )
@@ -134,6 +134,10 @@ fun ComparisonResultScreen(
 
             item {
                 ExecutiveSummaryCard(dashboard?.executiveSummary.orEmpty())
+            }
+
+            item {
+                DashboardHeroKpis(dashboard)
             }
 
             item {
@@ -174,6 +178,8 @@ fun ComparisonResultScreen(
                                 title = "Exposición externa",
                                 metrics = dashboard?.exposureMetrics.orEmpty(),
                                 emptyMessage = "No hay métricas de exposición disponibles.",
+                                leftTitle = sideDisplayName(dashboard, left = true),
+                                rightTitle = sideDisplayName(dashboard, left = false),
                             )
                             else -> TechnicalTab(result)
                         }
@@ -447,19 +453,49 @@ private fun ExecutiveSummaryCard(summary: List<String>) {
 @Composable
 private fun SummaryTab(dashboard: ComparisonDashboard?) {
     val verdictCards = dashboard?.verdictCards.orEmpty()
-    val fallbackKpis = dashboard?.quickKpis.orEmpty()
+    val quickKpis = dashboard?.quickKpis.orEmpty()
+    val leftTitle = sideDisplayName(dashboard, left = true)
+    val rightTitle = sideDisplayName(dashboard, left = false)
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (verdictCards.isEmpty() && fallbackKpis.isEmpty()) {
+        if (!dashboard.hasDashboardValues()) {
+            EmptyState(
+                "El backend no ha devuelto métricas numéricas completas. Se mostrarán los datos que estén disponibles.",
+            )
+        }
+
+        if (verdictCards.isEmpty() && quickKpis.isEmpty()) {
             EmptyState("No hay métricas resumidas disponibles.")
         } else {
             verdictCards.forEach { card -> VerdictCard(card) }
-            fallbackKpis.forEach { kpi -> QuickKpiCard(kpi) }
+            quickKpis.forEach { kpi -> QuickKpiCard(kpi, leftTitle, rightTitle) }
         }
 
         MetricsSection(
-            title = "Plataforma Android",
+            title = "Evolución de la plataforma",
             metrics = dashboard?.platformMetrics.orEmpty(),
             emptyMessage = "No hay métricas de plataforma disponibles.",
+            leftTitle = leftTitle,
+            rightTitle = rightTitle,
+        )
+        MetricsSection(
+            title = "Exposición de datos",
+            metrics = dashboard?.exposureMetrics.orEmpty().take(4),
+            emptyMessage = "No hay métricas de exposición disponibles.",
+            leftTitle = leftTitle,
+            rightTitle = rightTitle,
+        )
+        MetricsSection(
+            title = "Riesgos MobSF principales",
+            metrics = dashboard?.securityMetrics.orEmpty()
+                .filter { metric ->
+                    val label = metric.label.lowercase()
+                    label.contains("high") || label.contains("warning") || label.contains("tráfico") || label.contains("clear") || label.contains("stack")
+                }
+                .take(5),
+            emptyMessage = "No hay métricas de seguridad disponibles.",
+            leftTitle = leftTitle,
+            rightTitle = rightTitle,
         )
     }
 }
@@ -510,7 +546,7 @@ private fun VerdictCard(card: DashboardVerdictCard) {
 }
 
 @Composable
-private fun QuickKpiCard(kpi: QuickKpi) {
+private fun QuickKpiCard(kpi: QuickKpi, leftTitle: String, rightTitle: String) {
     val accent = when (kpi.level?.lowercase()) {
         "positive" -> PiCheckHCGreen
         "risk" -> PiCheckBurgundy
@@ -550,8 +586,8 @@ private fun QuickKpiCard(kpi: QuickKpi) {
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                KpiValueBox("Izquierda", kpi.leftLabel ?: valueLabel(kpi.leftValue), PiCheckHCBlue, Modifier.weight(1f))
-                KpiValueBox("Derecha", kpi.rightLabel ?: valueLabel(kpi.rightValue), PiCheckLegacyDark, Modifier.weight(1f))
+                KpiValueBox(leftTitle, kpi.leftLabel ?: valueLabel(kpi.leftValue), PiCheckHCBlue, Modifier.weight(1f))
+                KpiValueBox(rightTitle, kpi.rightLabel ?: valueLabel(kpi.rightValue), PiCheckLegacyDark, Modifier.weight(1f))
             }
         }
     }
@@ -588,6 +624,8 @@ private fun KpiValueBox(
 
 @Composable
 private fun PrivacyTab(dashboard: ComparisonDashboard?) {
+    val leftTitle = sideDisplayName(dashboard, left = true)
+    val rightTitle = sideDisplayName(dashboard, left = false)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
             text = "Health Connect puede aumentar el número de permisos declarados, pero introduce permisos más granulares para datos de salud.",
@@ -598,6 +636,8 @@ private fun PrivacyTab(dashboard: ComparisonDashboard?) {
             title = "Privacidad y permisos",
             metrics = dashboard?.privacyMetrics.orEmpty(),
             emptyMessage = "No hay métricas de privacidad disponibles.",
+            leftTitle = leftTitle,
+            rightTitle = rightTitle,
         )
         dashboard?.permissionDiff?.let { diff ->
             PermissionDiffCard(
@@ -665,26 +705,41 @@ private fun MetricsSection(
     title: String,
     metrics: List<DashboardMetric>,
     emptyMessage: String,
+    leftTitle: String = "Health Connect",
+    rightTitle: String = "Legacy",
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            text = title,
-            color = PiCheckBlue,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        if (metrics.isEmpty()) {
-            EmptyState(emptyMessage)
-        } else {
-            metrics.forEach { metric ->
-                ComparisonBarMetric(
-                    label = metric.label,
-                    leftLabel = metric.leftLabel ?: valueLabel(metric.leftValue),
-                    rightLabel = metric.rightLabel ?: valueLabel(metric.rightValue),
-                    leftValue = metric.leftValue,
-                    rightValue = metric.rightValue,
-                    preferred = metric.preferred,
-                )
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, PiCheckCardBorder),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFFBFCFF)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = title,
+                color = PiCheckBlue,
+                fontWeight = FontWeight.ExtraBold,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            if (metrics.isEmpty()) {
+                EmptyState(emptyMessage)
+            } else {
+                metrics.forEach { metric ->
+                    ComparisonBarMetric(
+                        label = metric.label,
+                        leftLabel = metric.leftLabel ?: valueLabel(metric.leftValue),
+                        rightLabel = metric.rightLabel ?: valueLabel(metric.rightValue),
+                        leftValue = metric.leftValue,
+                        rightValue = metric.rightValue,
+                        preferred = metric.preferred,
+                        leftTitle = leftTitle,
+                        rightTitle = rightTitle,
+                    )
+                }
             }
         }
     }
@@ -698,6 +753,8 @@ private fun ComparisonBarMetric(
     leftValue: Float?,
     rightValue: Float?,
     preferred: String?,
+    leftTitle: String,
+    rightTitle: String,
 ) {
     val maxValue = max(1f, max(leftValue ?: 0f, rightValue ?: 0f))
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -717,8 +774,8 @@ private fun ComparisonBarMetric(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        BarRow("Izquierda", leftLabel, leftValue, maxValue, PiCheckHCBlue)
-        BarRow("Derecha", rightLabel, rightValue, maxValue, PiCheckLegacyGray)
+        BarRow(leftTitle, leftLabel, leftValue, maxValue, PiCheckHCBlue)
+        BarRow(rightTitle, rightLabel, rightValue, maxValue, PiCheckLegacyGray)
     }
 }
 
@@ -770,21 +827,16 @@ private fun BarRow(
 private fun SecurityTab(dashboard: ComparisonDashboard?) {
     val metrics = dashboard?.securityMetrics.orEmpty()
     val findings = dashboard?.technicalFindings.orEmpty()
+    val leftTitle = sideDisplayName(dashboard, left = true)
+    val rightTitle = sideDisplayName(dashboard, left = false)
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (metrics.isEmpty()) {
-            EmptyState("No hay métricas de seguridad agregadas disponibles.")
-        } else {
-            metrics.forEach { metric ->
-                ComparisonBarMetric(
-                    label = metric.label,
-                    leftLabel = metric.leftLabel ?: valueLabel(metric.leftValue),
-                    rightLabel = metric.rightLabel ?: valueLabel(metric.rightValue),
-                    leftValue = metric.leftValue,
-                    rightValue = metric.rightValue,
-                    preferred = metric.preferred,
-                )
-            }
-        }
+        MetricsSection(
+            title = "Seguridad y hardening",
+            metrics = metrics,
+            emptyMessage = "No hay métricas de seguridad agregadas disponibles.",
+            leftTitle = leftTitle,
+            rightTitle = rightTitle,
+        )
 
         Text(
             text = "Hallazgos técnicos",
@@ -984,6 +1036,88 @@ private fun InfoLine(
     }
 }
 
+@Composable
+private fun DashboardHeroKpis(dashboard: ComparisonDashboard?) {
+    val leftTitle = sideDisplayName(dashboard, left = true)
+    val rightTitle = sideDisplayName(dashboard, left = false)
+    val cards = listOfNotNull(
+        dashboard?.platformMetrics?.firstOrNull { it.label.contains("target", ignoreCase = true) || it.label.contains("objetivo", ignoreCase = true) }?.let {
+            HeroMetric("Plataforma", it, leftTitle, rightTitle)
+        },
+        dashboard?.privacyMetrics?.firstOrNull { it.label.contains("peligros", ignoreCase = true) }?.let {
+            HeroMetric("Permisos", it, leftTitle, rightTitle)
+        },
+        dashboard?.securityMetrics?.firstOrNull { it.label.contains("HIGH", ignoreCase = true) }?.let {
+            HeroMetric("Riesgos HIGH", it, leftTitle, rightTitle)
+        },
+        dashboard?.exposureMetrics?.firstOrNull { it.label.contains("tracker", ignoreCase = true) }?.let {
+            HeroMetric("Trackers", it, leftTitle, rightTitle)
+        },
+    )
+
+    if (cards.isEmpty()) return
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        cards.forEach { card ->
+            HeroMetricCard(card)
+        }
+    }
+}
+
+private data class HeroMetric(
+    val title: String,
+    val metric: DashboardMetric,
+    val leftTitle: String,
+    val rightTitle: String,
+)
+
+@Composable
+private fun HeroMetricCard(card: HeroMetric) {
+    val leftValue = card.metric.leftLabel ?: valueLabel(card.metric.leftValue)
+    val rightValue = card.metric.rightLabel ?: valueLabel(card.metric.rightValue)
+    Card(
+        modifier = Modifier.width(210.dp),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, PiCheckCardBorder),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = card.title,
+                color = PiCheckDarkText,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            KpiValueBox(card.leftTitle, leftValue, PiCheckHCBlue)
+            KpiValueBox(card.rightTitle, rightValue, PiCheckLegacyDark)
+        }
+    }
+}
+
+private fun ComparisonDashboard?.hasDashboardValues(): Boolean {
+    if (this == null) return false
+    val metrics = platformMetrics + privacyMetrics + securityMetrics + exposureMetrics
+    return metrics.any { it.leftValue != null || it.rightValue != null || !it.leftLabel.isNullOrBlank() || !it.rightLabel.isNullOrBlank() }
+}
+
+private fun sideDisplayName(dashboard: ComparisonDashboard?, left: Boolean): String {
+    val side = if (left) dashboard?.header?.left else dashboard?.header?.right
+    val legacy = if (left) dashboard?.header?.leftTitle else dashboard?.header?.rightTitle
+    return side?.label
+        ?: legacy
+        ?: if (left) "Health Connect" else "Legacy"
+}
+
 private fun valueLabel(value: Float?): String = when {
     value == null -> "N/D"
     value % 1f == 0f -> value.toInt().toString()
@@ -1012,8 +1146,8 @@ private fun reportSummary(available: Boolean?, sizeBytes: Long?): String {
 }
 
 private fun sideLabel(value: String?): String = when (value?.lowercase()) {
-    "left" -> "Izquierda"
-    "right" -> "Derecha"
+    "left" -> "Health Connect"
+    "right" -> "Legacy"
     else -> "No especificado"
 }
 
@@ -1025,4 +1159,4 @@ private fun severityColor(value: String?): Color = when (value?.lowercase()) {
 
 private fun isHealthConnect(value: String): Boolean =
     value.equals("HEALTH_CONNECT", ignoreCase = true) ||
-        value.equals("health_connect", ignoreCase = true)
+            value.equals("health_connect", ignoreCase = true)
