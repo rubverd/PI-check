@@ -106,3 +106,21 @@ data class DashboardTechnicalSummary(
     val rightReportSizeBytes: Long? = null,
     val rawReportInResponse: Boolean? = null,
 )
+
+
+data class MastgTestRow(
+    val id: String,
+    val title: String,
+    val relationType: String,
+    val leftStatus: MastgTestStatus,
+    val rightStatus: MastgTestStatus,
+    val evidence: String? = null,
+)
+
+enum class MastgTestStatus {
+    PASS,
+    FAIL,
+    REVIEW,
+    NOT_EVALUABLE,
+    ERROR
+}
