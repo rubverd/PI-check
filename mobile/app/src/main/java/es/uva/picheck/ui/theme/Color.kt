@@ -27,3 +27,12 @@ val PiCheckHCHint = Color(0xFFF0F4FF)
 val PiCheckLegacyGray = Color(0xFF7A869A)
 val PiCheckLegacyDark = Color(0xFF4A5568)
 val PiCheckLegacyBg = Color(0xFFF4F5F7)
+
+val PiCheckCompareLeft = Color(0xFF2D5BFF)
+val PiCheckCompareLeftBg = Color(0xFFF0F4FF)
+
+val PiCheckCompareRight = Color(0xFFFF2D55)
+val PiCheckCompareRightBg = Color(0xFFFFF0F3)
+
+val PiCheckModelLegacy = Color(0xFF111827)
+val PiCheckModelNeutral = Color(0xFF6B7280)

@@ -2,6 +2,7 @@ package es.uva.picheck.data.remote
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import es.uva.picheck.data.model.AnalyzedApp
 import es.uva.picheck.data.model.ComparisonDashboard
 import es.uva.picheck.data.model.DashboardHeader
@@ -47,6 +48,8 @@ object PiCheckApiClient {
 
     private val BASE_URL = ApiEnvironment.BASE_URL
     private const val MAX_RESPONSE_BODY_BYTES = 10 * 1024 * 1024
+    private const val DASHBOARD_LOG_TAG = "PiCheckDashboard"
+    private const val DASHBOARD_DEBUG = true
 
     suspend fun searchApps(query: String): List<PlayStoreApp> = withContext(Dispatchers.IO) {
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
@@ -70,6 +73,7 @@ object PiCheckApiClient {
             .put("download_apks", downloadApks)
 
         val response = post("/api/comparisons/request", body)
+        response.logComparisonResponseDiagnostics()
         response.toPiCheckComparisonAnalysis()
     }
 
@@ -265,6 +269,62 @@ object PiCheckApiClient {
         return response
     }
 
+
+    private fun JSONObject.logComparisonResponseDiagnostics() {
+        debugLog("Comparison response received. length=${toString().length}")
+        debugLog("Root keys=${keysListLimited()}")
+        val comparisonObject = optJSONObject("comparison")
+        val rootHighlights = optJSONObject("raw_mobsf_highlights")
+        val nestedHighlights = comparisonObject?.optJSONObject("raw_mobsf_highlights")
+        debugLog("hasRootComparison=${comparisonObject != null}")
+        debugLog("hasRootHighlights=${rootHighlights != null}")
+        debugLog("hasNestedHighlights=${nestedHighlights != null}")
+        val dashboardFromBackend = optJSONObject("dashboard") != null || comparisonObject?.optJSONObject("dashboard") != null
+        debugLog("dashboardFromBackend=$dashboardFromBackend")
+    }
+
+    private fun debugLog(message: String) {
+        if (DASHBOARD_DEBUG) Log.d(DASHBOARD_LOG_TAG, message)
+    }
+
+    private fun ComparisonDashboard?.logDashboardMetrics() {
+        val dashboard = this ?: return
+        debugLog("platformMetrics=${dashboard.platformMetrics.size}")
+        debugLog("privacyMetrics=${dashboard.privacyMetrics.size}")
+        debugLog("securityMetrics=${dashboard.securityMetrics.size}")
+        debugLog("exposureMetrics=${dashboard.exposureMetrics.size}")
+        dashboard.platformMetrics.take(3).forEach {
+            debugLog("platform metric ${it.label}: ${it.leftLabel}/${it.rightLabel} values=${it.leftValue}/${it.rightValue}")
+        }
+    }
+
+    private fun JSONObject.keysListLimited(limit: Int = 30): List<String> {
+        val result = mutableListOf<String>()
+        val iterator = keys()
+        while (iterator.hasNext() && result.size < limit) {
+            result.add(iterator.next())
+        }
+        return result
+    }
+
+    private fun JSONObject.comparisonPayload(): JSONObject = optJSONObject("comparison") ?: this
+
+    private fun JSONObject.rawHighlightsPayload(): JSONObject? {
+        val comparisonPayload = comparisonPayload()
+        return optJSONObject("raw_mobsf_highlights")
+            ?: comparisonPayload.optJSONObject("raw_mobsf_highlights")
+    }
+
+    private fun JSONObject.dashboardPayload(): JSONObject? {
+        val comparisonPayload = comparisonPayload()
+        return optJSONObject("dashboard")
+            ?: comparisonPayload.optJSONObject("dashboard")
+    }
+
+    private fun JSONObject.leftComparisonSide(): JSONObject? = comparisonPayload().optJSONObject("left")
+
+    private fun JSONObject.rightComparisonSide(): JSONObject? = comparisonPayload().optJSONObject("right")
+
     private fun JSONObject.toPlayStoreApp(): PlayStoreApp = PlayStoreApp(
         appId = getString("app_id"),
         title = getString("title"),
@@ -333,16 +393,17 @@ object PiCheckApiClient {
     private fun JSONObject.toPiCheckComparisonAnalysis(): PiCheckComparisonAnalysis {
         val comparisonJson = optNullableString("comparison_json")
             ?: optNullableJsonAsPrettyString("comparison")
-        val apiDashboard = optJSONObject("dashboard")?.toComparisonDashboard()
+        val apiDashboard = dashboardPayload()?.toComparisonDashboard()
         val derivedDashboardFromComparison = comparisonJson
             ?.let { runCatching { JSONObject(it).toDerivedComparisonDashboard() }.getOrNull() }
         val derivedDashboardFromResponse = toDerivedComparisonDashboard()
         val finalDashboard = when {
             apiDashboard.hasUsableDashboardData() -> apiDashboard
-            derivedDashboardFromComparison != null -> derivedDashboardFromComparison
-            derivedDashboardFromResponse != null -> derivedDashboardFromResponse
-            else -> apiDashboard
+            derivedDashboardFromComparison.hasUsableDashboardData() -> derivedDashboardFromComparison
+            derivedDashboardFromResponse.hasUsableDashboardData() -> derivedDashboardFromResponse
+            else -> apiDashboard ?: derivedDashboardFromComparison ?: derivedDashboardFromResponse
         }
+        finalDashboard.logDashboardMetrics()
 
         return PiCheckComparisonAnalysis(
             comparisonId = getString("comparison_id"),
@@ -509,12 +570,21 @@ object PiCheckApiClient {
     }
 
     private fun JSONObject.toDerivedComparisonDashboard(): ComparisonDashboard? {
-        val comparison = optJSONObject("comparison") ?: this
-        val rawHighlights = comparison.optJSONObject("raw_mobsf_highlights") ?: return null
+        val comparison = comparisonPayload()
+        val rawHighlights = rawHighlightsPayload() ?: return null
+        debugLog("Using locally derived dashboard from raw_mobsf_highlights")
         val leftReport = rawHighlights.optJSONObject("left") ?: return null
         val rightReport = rawHighlights.optJSONObject("right") ?: return null
-        val leftMeta = comparison.optJSONObject("left")
-        val rightMeta = comparison.optJSONObject("right")
+        val leftMeta = leftComparisonSide()
+        val rightMeta = rightComparisonSide()
+        debugLog("LEFT raw keys=${leftReport.keysListLimited()}")
+        debugLog("RIGHT raw keys=${rightReport.keysListLimited()}")
+        val leftTargetRaw = leftReport.optString("target_sdk")
+        val leftMinRaw = leftReport.optString("min_sdk")
+        val rightTargetRaw = rightReport.optString("target_sdk")
+        val rightMinRaw = rightReport.optString("min_sdk")
+        debugLog("LEFT target=$leftTargetRaw min=$leftMinRaw")
+        debugLog("RIGHT target=$rightTargetRaw min=$rightMinRaw")
 
         val leftModel = leftMeta?.optNullableString("integration_model")
             ?: comparison.optJSONObject("summary")?.optNullableString("left_model")
@@ -533,6 +603,9 @@ object PiCheckApiClient {
         val rightDangerous = rightReport.countDangerousPermissions()
         val leftHcPermissions = leftPermissions.count { it.isHealthConnectPermission() }
         val rightHcPermissions = rightPermissions.count { it.isHealthConnectPermission() }
+        debugLog("LEFT permissions=${leftPermissions.size} RIGHT permissions=${rightPermissions.size}")
+        debugLog("LEFT dangerous=$leftDangerous RIGHT dangerous=$rightDangerous")
+        debugLog("LEFT hcPerms=$leftHcPermissions RIGHT hcPerms=$rightHcPermissions")
         val leftHigh = leftReport.totalFindingsBySeverity("high")
         val rightHigh = rightReport.totalFindingsBySeverity("high")
         val leftWarning = leftReport.totalFindingsBySeverity("warning")
