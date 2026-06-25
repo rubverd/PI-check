@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.stickyHeader
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -64,19 +66,27 @@ import es.uva.picheck.ui.theme.PiCheckCompareLeft
 import es.uva.picheck.ui.theme.PiCheckCompareLeftBg
 import es.uva.picheck.ui.theme.PiCheckCompareRight
 import es.uva.picheck.ui.theme.PiCheckCompareRightBg
+import es.uva.picheck.ui.theme.PiCheckHealthConnect
+import es.uva.picheck.ui.theme.PiCheckHealthConnectBg
 import es.uva.picheck.ui.theme.PiCheckDarkText
+import es.uva.picheck.ui.theme.PiCheckLegacy
 import es.uva.picheck.ui.theme.PiCheckLegacyBg
 import es.uva.picheck.ui.theme.PiCheckLegacyGray
 import es.uva.picheck.ui.theme.PiCheckModelLegacy
 import es.uva.picheck.ui.theme.PiCheckModelNeutral
+import es.uva.picheck.ui.theme.PiCheckRiskHigh
+import es.uva.picheck.ui.theme.PiCheckSuccess
+import es.uva.picheck.ui.theme.PiCheckWarning
 import kotlin.math.max
 
 private enum class ComparisonTab { GENERAL, MASTG }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ComparisonResultScreen(result: PiCheckComparisonAnalysis, onNewComparison: () -> Unit) {
     val dashboard = result.dashboard
+    val (leftSide, rightSide) = comparisonSides(result, dashboard)
+    val (leftColors, rightColors) = resolveComparisonColors(leftSide, rightSide)
     Log.d(
         "PiCheckDashboardUI",
         "Rendering dashboard. platform=${dashboard?.platformMetrics?.size ?: 0}, privacy=${dashboard?.privacyMetrics?.size ?: 0}, security=${dashboard?.securityMetrics?.size ?: 0}, exposure=${dashboard?.exposureMetrics?.size ?: 0}",
@@ -91,17 +101,20 @@ fun ComparisonResultScreen(result: PiCheckComparisonAnalysis, onNewComparison: (
             modifier = Modifier.padding(innerPadding).padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            stickyHeader { CompactComparisonHeader(leftSide, rightSide, leftColors, rightColors) }
             item { ComparisonTabSelector(selectedTab) { selectedTab = it } }
             item {
                 Crossfade(targetState = selectedTab, label = "comparison-tab") { tab ->
                     when (tab) {
-                        ComparisonTab.GENERAL -> GeneralTab(result, dashboard)
+                        ComparisonTab.GENERAL -> GeneralTab(result, dashboard, leftSide, rightSide, leftColors, rightColors)
                         ComparisonTab.MASTG -> MastgIndexTab(
                             dashboard = dashboard,
-                            leftName = sideDisplayName(dashboard, true),
-                            rightName = sideDisplayName(dashboard, false),
-                            leftColor = PiCheckCompareLeft,
-                            rightColor = PiCheckCompareRight,
+                            leftName = sideDisplayName(leftSide),
+                            rightName = sideDisplayName(rightSide),
+                            leftColor = leftColors.accent,
+                            rightColor = rightColors.accent,
+                            leftColors = leftColors,
+                            rightColors = rightColors,
                         )
                     }
                 }
@@ -112,6 +125,121 @@ fun ComparisonResultScreen(result: PiCheckComparisonAnalysis, onNewComparison: (
                 }
             }
         }
+    }
+}
+
+private data class ComparisonSideColors(
+    val accent: Color,
+    val background: Color,
+    val border: Color,
+    val modelColor: Color,
+)
+
+private fun comparisonSides(
+    result: PiCheckComparisonAnalysis,
+    dashboard: ComparisonDashboard?,
+): Pair<DashboardSide, DashboardSide> = Pair(
+    dashboard?.header?.left ?: DashboardSide(
+        label = result.appA.versionApp.idApp,
+        appId = result.appA.versionApp.idApp,
+        version = result.appA.versionApp.version,
+        integrationModel = result.appA.versionApp.modeloIntegracion,
+        mobsfStatus = result.appA.versionApp.estadoMobsf,
+    ),
+    dashboard?.header?.right ?: DashboardSide(
+        label = result.appB.versionApp.idApp,
+        appId = result.appB.versionApp.idApp,
+        version = result.appB.versionApp.version,
+        integrationModel = result.appB.versionApp.modeloIntegracion,
+        mobsfStatus = result.appB.versionApp.estadoMobsf,
+    ),
+)
+
+private fun resolveComparisonColors(
+    left: DashboardSide,
+    right: DashboardSide,
+): Pair<ComparisonSideColors, ComparisonSideColors> {
+    val sameApp = !left.appId.isNullOrBlank() && left.appId.equals(right.appId, ignoreCase = true)
+    val leftIsHC = isHealthConnectModel(left.integrationModel)
+    val rightIsHC = isHealthConnectModel(right.integrationModel)
+    val leftIsLegacy = isLegacyModel(left.integrationModel)
+    val rightIsLegacy = isLegacyModel(right.integrationModel)
+    val isEvolutionComparison = sameApp && leftIsHC != rightIsHC && (leftIsLegacy || rightIsLegacy)
+
+    Log.d("PiCheckDashboardUI", "sameApp=$sameApp isEvolutionComparison=$isEvolutionComparison")
+    Log.d("PiCheckDashboardUI", "leftName=${appDisplayName(left)} leftVersion=${left.version} leftModel=${left.integrationModel}")
+    Log.d("PiCheckDashboardUI", "rightName=${appDisplayName(right)} rightVersion=${right.version} rightModel=${right.integrationModel}")
+
+    fun healthConnectColors() = ComparisonSideColors(PiCheckHealthConnect, PiCheckHealthConnectBg, PiCheckHealthConnect.copy(alpha = 0.35f), PiCheckHealthConnect)
+    fun legacyColors() = ComparisonSideColors(PiCheckLegacy, PiCheckLegacyBg, PiCheckLegacy.copy(alpha = 0.35f), PiCheckLegacy)
+    fun leftSideColors() = ComparisonSideColors(PiCheckCompareLeft, PiCheckCompareLeftBg, PiCheckCompareLeft.copy(alpha = 0.35f), if (leftIsHC) PiCheckHealthConnect else PiCheckModelLegacy)
+    fun rightSideColors() = ComparisonSideColors(PiCheckCompareRight, PiCheckCompareRightBg, PiCheckCompareRight.copy(alpha = 0.35f), if (rightIsHC) PiCheckHealthConnect else PiCheckModelLegacy)
+
+    return if (isEvolutionComparison) {
+        Pair(if (leftIsHC) healthConnectColors() else legacyColors(), if (rightIsHC) healthConnectColors() else legacyColors())
+    } else {
+        Pair(leftSideColors(), rightSideColors())
+    }
+}
+
+@Composable
+private fun CompactComparisonHeader(left: DashboardSide, right: DashboardSide, leftColors: ComparisonSideColors, rightColors: ComparisonSideColors) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, PiCheckCardBorder),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CompactSideSummary(left, leftColors, Modifier.weight(1f))
+            Text("vs", color = PiCheckModelNeutral, fontWeight = FontWeight.ExtraBold)
+            CompactSideSummary(right, rightColors, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun CompactSideSummary(side: DashboardSide, colors: ComparisonSideColors, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("${appDisplayName(side)} ${side.version?.let { "v$it" }.orEmpty()}", color = colors.accent, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+            ModelChip(modelDisplay(side.integrationModel), colors.modelColor, compact = true)
+            Text("MobSF ${compactMobsfStatus(side.mobsfStatus)}", color = PiCheckModelNeutral, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun ModelChip(model: String, color: Color, compact: Boolean = false) {
+    Text(
+        text = if (compact) modelShort(model) else model,
+        modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(color.copy(alpha = 0.10f)).padding(horizontal = if (compact) 7.dp else 10.dp, vertical = if (compact) 2.dp else 4.dp),
+        color = color,
+        fontWeight = FontWeight.Bold,
+        style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
+        maxLines = 1,
+    )
+}
+
+@Composable
+private fun MastgLegend() {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        LegendItem(MastgTestStatus.PASS, "Superada")
+        LegendItem(MastgTestStatus.FAIL, "No superada")
+        LegendItem(MastgTestStatus.REVIEW, "Revisión")
+    }
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        LegendItem(MastgTestStatus.NOT_EVALUABLE, "No evaluable")
+        LegendItem(MastgTestStatus.ERROR, "Error")
+    }
+}
+
+@Composable
+private fun LegendItem(status: MastgTestStatus, label: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        MastgStatusDot(status)
+        Text(label, color = PiCheckModelNeutral, style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -132,35 +260,40 @@ private fun ComparisonTabSelector(selected: ComparisonTab, onSelected: (Comparis
 }
 
 @Composable
-private fun GeneralTab(result: PiCheckComparisonAnalysis, dashboard: ComparisonDashboard?) {
-    val left = dashboard?.header?.left ?: DashboardSide(label = result.appA.versionApp.idApp, version = result.appA.versionApp.version, integrationModel = result.appA.versionApp.modeloIntegracion, mobsfStatus = result.appA.versionApp.estadoMobsf)
-    val right = dashboard?.header?.right ?: DashboardSide(label = result.appB.versionApp.idApp, version = result.appB.versionApp.version, integrationModel = result.appB.versionApp.modeloIntegracion, mobsfStatus = result.appB.versionApp.estadoMobsf)
+private fun GeneralTab(
+    result: PiCheckComparisonAnalysis,
+    dashboard: ComparisonDashboard?,
+    left: DashboardSide,
+    right: DashboardSide,
+    leftColors: ComparisonSideColors,
+    rightColors: ComparisonSideColors,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            ComparedAppCard(left, "Izquierda", PiCheckCompareLeft, PiCheckCompareLeftBg, Modifier.weight(1f))
-            ComparedAppCard(right, "Derecha", PiCheckCompareRight, PiCheckCompareRightBg, Modifier.weight(1f))
+            ComparedAppCard(left, "Izquierda", leftColors, Modifier.weight(1f))
+            ComparedAppCard(right, "Derecha", rightColors, Modifier.weight(1f))
         }
         if (!dashboard.hasDashboardValues()) DiagnosticCard()
         ExecutiveSummaryCard(dashboard?.executiveSummary.orEmpty())
         dashboard?.verdictCards.orEmpty().forEach { VerdictCard(it) }
-        MetricSection("Evolución de plataforma", "targetSdk y minSdk declarados", dashboard?.platformMetrics.orEmpty(), sideDisplayName(dashboard, true), sideDisplayName(dashboard, false))
-        MetricSection("Privacidad y permisos", "Permisos peligrosos, Health Connect, ubicación, almacenamiento y sensores", dashboard?.privacyMetrics.orEmpty(), sideDisplayName(dashboard, true), sideDisplayName(dashboard, false))
-        MetricSection("Riesgos MobSF", "Hallazgos HIGH/WARNING y riesgos de manifest/código", dashboard?.securityMetrics.orEmpty(), sideDisplayName(dashboard, true), sideDisplayName(dashboard, false))
-        MetricSection("Exposición externa", "Trackers, dominios y URLs", dashboard?.exposureMetrics.orEmpty(), sideDisplayName(dashboard, true), sideDisplayName(dashboard, false))
+        MetricSection("Evolución de plataforma", "targetSdk y minSdk declarados", dashboard?.platformMetrics.orEmpty(), sideDisplayName(left), sideDisplayName(right), leftColors.accent, rightColors.accent)
+        MetricSection("Privacidad y permisos", "Permisos peligrosos, Health Connect, ubicación, almacenamiento y sensores", dashboard?.privacyMetrics.orEmpty(), sideDisplayName(left), sideDisplayName(right), leftColors.accent, rightColors.accent)
+        MetricSection("Riesgos MobSF", "Hallazgos HIGH/WARNING y riesgos de manifest/código", dashboard?.securityMetrics.orEmpty(), sideDisplayName(left), sideDisplayName(right), leftColors.accent, rightColors.accent)
+        MetricSection("Exposición externa", "Trackers, dominios y URLs", dashboard?.exposureMetrics.orEmpty(), sideDisplayName(left), sideDisplayName(right), leftColors.accent, rightColors.accent)
     }
 }
 
 @Composable
-private fun ComparedAppCard(side: DashboardSide, sideLabel: String, sideColor: Color, sideBackground: Color, modifier: Modifier = Modifier) {
-    val model = modelDisplay(side.integrationModel ?: side.label)
-    val modelColor = if (isHealthConnect(model)) sideColor else PiCheckModelLegacy
-    Card(modifier = modifier, shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, sideColor.copy(alpha = 0.35f)), colors = CardDefaults.cardColors(containerColor = sideBackground)) {
-        Column(modifier = Modifier.padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(sideLabel, color = sideColor, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.labelMedium)
-            AppIcon(side.icon, side.label ?: side.appId ?: sideLabel, sideColor)
-            Text(side.label ?: side.appId ?: "Aplicación", color = sideColor, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+private fun ComparedAppCard(side: DashboardSide, sideLabel: String, colors: ComparisonSideColors, modifier: Modifier = Modifier) {
+    val appName = appDisplayName(side)
+    val model = modelDisplay(side.integrationModel)
+    Card(modifier = modifier, shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, colors.border), colors = CardDefaults.cardColors(containerColor = colors.background)) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(sideLabel, color = colors.accent, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.labelMedium)
+            AppIcon(side.icon, appName, colors.accent)
+            Text(appName, color = colors.accent, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text("Versión ${side.version ?: "N/D"}", color = PiCheckDarkText, fontWeight = FontWeight.SemiBold, maxLines = 1)
-            Text(model, modifier = Modifier.clip(RoundedCornerShape(99.dp)).background(Color.White.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 4.dp), color = modelColor, fontWeight = FontWeight.Bold, maxLines = 1)
+            ModelChip(model, colors.modelColor)
             Text("MobSF: ${side.mobsfStatus ?: "N/D"}", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall, maxLines = 1)
         }
     }
@@ -191,12 +324,25 @@ private fun VerdictCard(card: DashboardVerdictCard) {
 }
 
 @Composable
-private fun MetricSection(title: String, subtitle: String? = null, metrics: List<DashboardMetric>, leftName: String, rightName: String, modifier: Modifier = Modifier) {
+private fun MetricSection(
+    title: String,
+    subtitle: String? = null,
+    metrics: List<DashboardMetric>,
+    leftName: String,
+    rightName: String,
+    leftColor: Color,
+    rightColor: Color,
+    modifier: Modifier = Modifier,
+) {
     DashboardCard(modifier) {
         Text(title, color = PiCheckBlue, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
         subtitle?.let { Text(it, color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall) }
         val visible = metrics.filter { it.leftValue != null || it.rightValue != null || !it.leftLabel.isNullOrBlank() || !it.rightLabel.isNullOrBlank() }
-        if (visible.isEmpty()) EmptyState("No hay métricas calculables para este bloque.") else visible.forEach { PureComposeBarChart(it, leftName, rightName, PiCheckCompareLeft, PiCheckCompareRight) }
+        if (visible.isEmpty()) {
+            EmptyState("No hay métricas calculables para este bloque.")
+        } else {
+            visible.forEach { PureComposeBarChart(it, leftName, rightName, leftColor, rightColor) }
+        }
     }
 }
 
@@ -223,7 +369,7 @@ private fun BarRow(title: String, valueLabel: String, value: Float?, maxValue: F
 }
 
 @Composable
-private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftName: String, rightName: String, leftColor: Color, rightColor: Color) {
+private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftName: String, rightName: String, leftColor: Color, rightColor: Color, leftColors: ComparisonSideColors, rightColors: ComparisonSideColors) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             MastgGauge(leftName, dashboard?.mastgScore?.left, leftColor, Modifier.weight(1f))
@@ -233,7 +379,7 @@ private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftName: String, rig
             Text("Evaluación preliminar basada en evidencias MobSF", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold)
             Text(dashboard?.mastgScore?.label ?: "Evaluación MASTG pendiente", color = PiCheckDarkText.copy(alpha = 0.76f), style = MaterialTheme.typography.bodySmall)
         }
-        MastgEvidenceTable(buildMastgRows(dashboard), leftName, rightName)
+        MastgEvidenceTable(buildMastgRows(dashboard), leftName, rightName, leftColors.accent, rightColors.accent)
     }
 }
 
@@ -260,13 +406,14 @@ private fun MastgGauge(title: String, score: Float?, color: Color, modifier: Mod
 }
 
 @Composable
-private fun MastgEvidenceTable(rows: List<MastgTestRow>, leftName: String, rightName: String) {
+private fun MastgEvidenceTable(rows: List<MastgTestRow>, leftName: String, rightName: String, leftColor: Color, rightColor: Color) {
     DashboardCard {
-        Text("Tabla de pruebas MASTG", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+        Text("Evidencias MobSF asociadas a MASTG", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+        MastgLegend()
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Prueba MASTG", Modifier.weight(1.8f), fontWeight = FontWeight.Bold, color = PiCheckDarkText)
-            Text(leftName, Modifier.weight(1f), fontWeight = FontWeight.Bold, color = PiCheckCompareLeft, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(rightName, Modifier.weight(1f), fontWeight = FontWeight.Bold, color = PiCheckCompareRight, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(leftName, Modifier.weight(1f), fontWeight = FontWeight.Bold, color = leftColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(rightName, Modifier.weight(1f), fontWeight = FontWeight.Bold, color = rightColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         rows.forEach { row ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -282,7 +429,7 @@ private fun MastgEvidenceTable(rows: List<MastgTestRow>, leftName: String, right
 private fun MastgStatusDot(status: MastgTestStatus) {
     when (status) {
         MastgTestStatus.NOT_EVALUABLE -> Text("—", color = PiCheckLegacyGray, fontWeight = FontWeight.ExtraBold)
-        MastgTestStatus.ERROR -> Text("X", color = PiCheckBurgundy, fontWeight = FontWeight.ExtraBold)
+        MastgTestStatus.ERROR -> Text("✕", color = PiCheckRiskHigh, fontWeight = FontWeight.ExtraBold)
         else -> Box(Modifier.size(14.dp).clip(CircleShape).background(statusColor(status)))
     }
 }
@@ -335,12 +482,28 @@ private fun ComparisonDashboard?.hasDashboardValues(): Boolean {
     return metrics.any { it.leftValue != null || it.rightValue != null || !it.leftLabel.isNullOrBlank() || !it.rightLabel.isNullOrBlank() }
 }
 
-private fun sideDisplayName(dashboard: ComparisonDashboard?, left: Boolean): String {
-    val side = if (left) dashboard?.header?.left else dashboard?.header?.right
-    return listOfNotNull(side?.label, side?.version?.let { "v$it" }).joinToString(" ").ifBlank { if (left) "Izquierda" else "Derecha" }
+private fun sideDisplayName(side: DashboardSide): String =
+    listOfNotNull(appDisplayName(side), side.version?.let { "v$it" }).joinToString(" ")
+
+private fun appDisplayName(side: DashboardSide): String {
+    val candidates = listOf(side.name, side.appName, side.title, side.label, side.appId)
+    return candidates.firstOrNull { value ->
+        !value.isNullOrBlank() && !value.isIntegrationModelLabel()
+    } ?: side.appId ?: "Aplicación"
 }
 
+private fun String.isIntegrationModelLabel(): Boolean =
+    equals("Health Connect", ignoreCase = true) ||
+            equals("Legacy", ignoreCase = true) ||
+            equals("HEALTH_CONNECT", ignoreCase = true) ||
+            equals("health_connect", ignoreCase = true) ||
+            equals("HC", ignoreCase = true) ||
+            equals("L", ignoreCase = true)
+
 private fun valueLabel(value: Float?): String = when { value == null -> "N/D"; value % 1f == 0f -> value.toInt().toString(); else -> "%.1f".format(value) }
-private fun modelDisplay(value: String?): String = if (value?.contains("health", true) == true) "Health Connect" else if (value?.contains("legacy", true) == true) "Legacy" else value ?: "Modelo desconocido"
-private fun isHealthConnect(value: String): Boolean = value.contains("Health Connect", true) || value.contains("HEALTH_CONNECT", true) || value.contains("health_connect", true)
-private fun statusColor(status: MastgTestStatus): Color = when (status) { MastgTestStatus.PASS -> Color(0xFF16A34A); MastgTestStatus.FAIL -> Color(0xFFDC2626); MastgTestStatus.REVIEW -> Color(0xFFEAB308); MastgTestStatus.NOT_EVALUABLE -> PiCheckLegacyGray; MastgTestStatus.ERROR -> PiCheckBurgundy }
+private fun modelDisplay(value: String?): String = if (isHealthConnectModel(value)) "Health Connect" else if (isLegacyModel(value)) "Legacy" else value ?: "Modelo desconocido"
+private fun modelShort(value: String): String = when { value.contains("health", true) -> "HC"; value.contains("legacy", true) -> "Legacy"; else -> value.take(8) }
+private fun isHealthConnectModel(value: String?): Boolean = value.equals("HEALTH_CONNECT", true) || value.equals("health_connect", true) || value.equals("Health Connect", true)
+private fun isLegacyModel(value: String?): Boolean = value.equals("LEGACY", true) || value.equals("legacy", true) || value.equals("Legacy", true)
+private fun compactMobsfStatus(value: String?): String = when (value?.lowercase()) { "success", "ok", "completed" -> "OK"; "error", "failed" -> "ERROR"; "pending", "queued", "running" -> "PENDING"; else -> value ?: "N/D" }
+private fun statusColor(status: MastgTestStatus): Color = when (status) { MastgTestStatus.PASS -> PiCheckSuccess; MastgTestStatus.FAIL -> PiCheckRiskHigh; MastgTestStatus.REVIEW -> PiCheckWarning; MastgTestStatus.NOT_EVALUABLE -> PiCheckLegacyGray; MastgTestStatus.ERROR -> PiCheckRiskHigh }

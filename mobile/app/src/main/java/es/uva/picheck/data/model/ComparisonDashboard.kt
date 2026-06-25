@@ -34,6 +34,9 @@ data class DashboardHeader(
 
 data class DashboardSide(
     val label: String? = null,
+    val name: String? = null,
+    val appName: String? = null,
+    val title: String? = null,
     val appId: String? = null,
     val version: String? = null,
     val versionCode: Int? = null,

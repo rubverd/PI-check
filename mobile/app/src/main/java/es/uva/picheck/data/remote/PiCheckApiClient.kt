@@ -478,6 +478,9 @@ object PiCheckApiClient {
     private fun JSONObject.toDashboardSide(): DashboardSide =
         DashboardSide(
             label = optNullableString("label"),
+            name = optNullableString("name"),
+            appName = optNullableString("app_name"),
+            title = optNullableString("title"),
             appId = optNullableString("app_id"),
             version = optNullableString("version"),
             versionCode = optNullableInt("version_code"),
@@ -665,7 +668,10 @@ object PiCheckApiClient {
                     ?: leftReport.optNullableString("app_name")
                     ?: "Comparativa",
                 left = DashboardSide(
-                    label = modelDisplayName(leftModel),
+                    label = leftMeta?.optNullableString("name") ?: leftMeta?.optNullableString("title") ?: leftReport.optNullableString("app_name"),
+                    name = leftMeta?.optNullableString("name"),
+                    appName = leftReport.optNullableString("app_name"),
+                    title = leftMeta?.optNullableString("title"),
                     appId = leftMeta?.optNullableString("app_id") ?: leftReport.optNullableString("package_name"),
                     version = leftMeta?.optNullableString("version") ?: leftReport.optNullableString("version_name"),
                     versionCode = leftMeta?.optNullableInt("version_code"),
@@ -675,7 +681,10 @@ object PiCheckApiClient {
                     icon = leftMeta?.optNullableString("icon"),
                 ),
                 right = DashboardSide(
-                    label = modelDisplayName(rightModel),
+                    label = rightMeta?.optNullableString("name") ?: rightMeta?.optNullableString("title") ?: rightReport.optNullableString("app_name"),
+                    name = rightMeta?.optNullableString("name"),
+                    appName = rightReport.optNullableString("app_name"),
+                    title = rightMeta?.optNullableString("title"),
                     appId = rightMeta?.optNullableString("app_id") ?: rightReport.optNullableString("package_name"),
                     version = rightMeta?.optNullableString("version") ?: rightReport.optNullableString("version_name"),
                     versionCode = rightMeta?.optNullableInt("version_code"),
