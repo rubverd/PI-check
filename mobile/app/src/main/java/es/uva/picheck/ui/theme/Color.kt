@@ -26,4 +26,21 @@ val PiCheckHCHint = Color(0xFFF0F4FF)
 // Legacy: apagado, plano y obsoleto
 val PiCheckLegacyGray = Color(0xFF7A869A)
 val PiCheckLegacyDark = Color(0xFF4A5568)
-val PiCheckLegacyBg = Color(0xFFF4F5F7)
+val PiCheckLegacyBg = Color(0xFFF1F5F9)
+
+val PiCheckCompareLeft = Color(0xFF2563EB)
+val PiCheckCompareLeftBg = Color(0xFFEFF6FF)
+
+val PiCheckCompareRight = Color(0xFF7C3AED)
+val PiCheckCompareRightBg = Color(0xFFF5F3FF)
+
+val PiCheckModelLegacy = Color(0xFF111827)
+val PiCheckModelNeutral = Color(0xFF6B7280)
+
+val PiCheckHealthConnect = Color(0xFF2563EB)
+val PiCheckHealthConnectBg = Color(0xFFEFF6FF)
+
+val PiCheckLegacy = Color(0xFF64748B)
+val PiCheckRiskHigh = Color(0xFFDC2626)
+val PiCheckWarning = Color(0xFFF59E0B)
+val PiCheckSuccess = Color(0xFF16A34A)
