@@ -180,10 +180,6 @@ private fun resolveComparisonColors(
     val isEvolutionComparison = sameApp && leftIsHC != rightIsHC && (leftIsLegacy || rightIsLegacy)
 
     Log.d("PiCheckDashboardUI", "sameApp=$sameApp isEvolutionComparison=$isEvolutionComparison")
-    Log.d("PiCheckDashboardUI", "Name candidates left: name=${left.name}, appName=${left.appName}, title=${left.title}, label=${left.label}, appId=${left.appId}")
-    Log.d("PiCheckDashboardUI", "Resolved left displayName=${appDisplayName(left)}")
-    Log.d("PiCheckDashboardUI", "Name candidates right: name=${right.name}, appName=${right.appName}, title=${right.title}, label=${right.label}, appId=${right.appId}")
-    Log.d("PiCheckDashboardUI", "Resolved right displayName=${appDisplayName(right)}")
     Log.d("PiCheckDashboardUI", "leftName=${appDisplayName(left)} leftVersion=${left.version} leftModel=${left.integrationModel}")
     Log.d("PiCheckDashboardUI", "rightName=${appDisplayName(right)} rightVersion=${right.version} rightModel=${right.integrationModel}")
 
@@ -219,7 +215,7 @@ private fun CompactComparisonHeader(left: DashboardSide, right: DashboardSide, l
 @Composable
 private fun CompactSideSummary(side: DashboardSide, colors: ComparisonSideColors, modifier: Modifier = Modifier) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("${appDisplayName(side)} ${side.version?.let { "v$it" }.orEmpty()}", color = colors.accent, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("${appDisplayName(side)} ${side.version?.let { "v$it" }.orEmpty()}", color = colors.accent, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
         Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
             ModelChip(modelDisplay(side.integrationModel), colors.modelColor, compact = true)
             Text("MobSF ${compactMobsfStatus(side.mobsfStatus)}", color = PiCheckModelNeutral, style = MaterialTheme.typography.labelSmall, maxLines = 1)
@@ -236,6 +232,7 @@ private fun ModelChip(model: String, color: Color, compact: Boolean = false) {
         fontWeight = FontWeight.Bold,
         style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
         maxLines = 1,
+        textAlign = TextAlign.Center
     )
 }
 
@@ -270,7 +267,7 @@ private fun ComparisonTabSelector(selected: ComparisonTab, onSelected: (Comparis
                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(if (active) PiCheckBlue else Color.Transparent).clickable { onSelected(tab) }.padding(vertical = 10.dp),
                 color = if (active) Color.White else PiCheckDarkText,
                 fontWeight = FontWeight.Bold,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                textAlign = TextAlign.Center,
             )
         }
     }
@@ -306,21 +303,21 @@ private fun ComparedAppCard(side: DashboardSide, sideLabel: String, colors: Comp
     val model = modelDisplay(side.integrationModel)
     Card(modifier = modifier, shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, colors.border), colors = CardDefaults.cardColors(containerColor = colors.background)) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(sideLabel, color = colors.accent, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.labelMedium)
+            Text(sideLabel, color = colors.accent, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
             AppIcon(side.icon, appName, colors.accent)
-            Text(appName, color = colors.accent, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("Versión ${side.version ?: "N/D"}", color = PiCheckDarkText, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Text(appName, color = colors.accent, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text("Versión ${side.version ?: "N/D"}", color = PiCheckDarkText, fontWeight = FontWeight.SemiBold, maxLines = 1, textAlign = TextAlign.Center)
             ModelChip(model, colors.modelColor)
-            Text("MobSF: ${side.mobsfStatus ?: "N/D"}", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            Text("MobSF: ${side.mobsfStatus ?: "N/D"}", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall, maxLines = 1, textAlign = TextAlign.Center)
         }
     }
 }
 
 @Composable
-private fun AppIcon(imageUrl: String?, fallback: String, color: Color, size: androidx.compose.ui.unit.Dp = 58.dp) {
-    Box(modifier = Modifier.size(size).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
-        Text(fallback.firstOrNull()?.uppercase() ?: "?", color = Color.White, fontWeight = FontWeight.ExtraBold)
-        if (!imageUrl.isNullOrBlank()) AsyncImage(model = imageUrl, contentDescription = "Icono de $fallback", contentScale = ContentScale.Crop, modifier = Modifier.size(size).clip(CircleShape))
+private fun AppIcon(imageUrl: String?, fallback: String, color: Color) {
+    Box(modifier = Modifier.size(58.dp).clip(CircleShape).background(color.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+        Text(fallback.firstOrNull()?.uppercase() ?: "?", color = color, fontWeight = FontWeight.ExtraBold)
+        if (!imageUrl.isNullOrBlank()) AsyncImage(model = imageUrl, contentDescription = "Icono de $fallback", contentScale = ContentScale.Crop, modifier = Modifier.size(58.dp).clip(CircleShape))
     }
 }
 
@@ -381,59 +378,75 @@ private fun BarRow(title: String, valueLabel: String, value: Float?, maxValue: F
         Box(modifier = Modifier.weight(1f).height(12.dp).clip(RoundedCornerShape(99.dp)).background(PiCheckCardBorder)) {
             Box(modifier = Modifier.fillMaxWidth(((value ?: 0f) / maxValue).coerceIn(0f, 1f)).height(12.dp).clip(RoundedCornerShape(99.dp)).background(color))
         }
-        Text(valueLabel, modifier = Modifier.width(62.dp), color = PiCheckDarkText, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-@Composable
-private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftSide: DashboardSide, rightSide: DashboardSide, leftColors: ComparisonSideColors, rightColors: ComparisonSideColors) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            MastgGauge(leftSide, dashboard?.mastgScore?.left, leftColors, Modifier.weight(1f))
-            MastgGauge(rightSide, dashboard?.mastgScore?.right, rightColors, Modifier.weight(1f))
-        }
-        DashboardCard {
-            Text("Evaluación preliminar basada en evidencias MobSF", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold)
-            Text(dashboard?.mastgScore?.label ?: "Evaluación MASTG pendiente", color = PiCheckDarkText.copy(alpha = 0.76f), style = MaterialTheme.typography.bodySmall)
-        }
-        MastgEvidenceTable(buildMastgRows(dashboard), leftSide, rightSide, leftColors, rightColors)
-    }
-}
-
-@Composable
-private fun MastgGauge(side: DashboardSide, score: Float?, colors: ComparisonSideColors, modifier: Modifier = Modifier) {
-    val boundedScore = score?.coerceIn(0f, 1f) ?: 0f
-    val animatedScore by animateFloatAsState(targetValue = boundedScore, label = "mastg-gauge")
-    DashboardCard(modifier) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            AppIcon(side.icon, appDisplayName(side), colors.accent, size = 34.dp)
-            Text(appDisplayName(side), color = colors.accent, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("Versión ${side.version ?: "N/D"}", color = PiCheckDarkText, style = MaterialTheme.typography.bodySmall, maxLines = 1)
-            ModelChip(modelDisplay(side.integrationModel), colors.modelColor, compact = true)
-            Box(contentAlignment = Alignment.Center) {
-                Canvas(modifier = Modifier.size(112.dp)) {
-                    val stroke = 13.dp.toPx(); val diameter = size.minDimension - stroke
-                    val topLeft = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
-                    val arcSize = Size(diameter, diameter)
-                    drawArc(PiCheckCardBorder, 135f, 270f, false, topLeft, arcSize, Stroke(stroke, cap = StrokeCap.Round))
-                    drawArc(if (score == null) PiCheckCardBorder else colors.accent, 135f, 270f * animatedScore, false, topLeft, arcSize, Stroke(stroke, cap = StrokeCap.Round))
-                }
-                Text(score?.let { "${(boundedScore * 100).toInt()}%" } ?: "Pendiente", color = if (score == null) PiCheckLegacyGray else colors.accent, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.bodySmall)
-            }
-            Text("Índice MASTG", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall)
-        }
         Text(valueLabel, modifier = Modifier.width(62.dp), color = PiCheckDarkText, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
     }
 }
 
 @Composable
-private fun MastgEvidenceTable(rows: List<MastgTestRow>, left: DashboardSide, right: DashboardSide, leftColors: ComparisonSideColors, rightColors: ComparisonSideColors) {
+private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftSide: DashboardSide, rightSide: DashboardSide, leftColors: ComparisonSideColors, rightColors: ComparisonSideColors) {
+    val leftName = sideDisplayName(leftSide)
+    val rightName = sideDisplayName(rightSide)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            MastgGauge(leftName, dashboard?.mastgScore?.left, leftColors.accent, Modifier.weight(1f))
+            MastgGauge(rightName, dashboard?.mastgScore?.right, rightColors.accent, Modifier.weight(1f))
+        }
+        DashboardCard {
+            Text("Evaluación preliminar basada en evidencias MobSF", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold)
+            Text(dashboard?.mastgScore?.label ?: "Evaluación MASTG pendiente", color = PiCheckDarkText.copy(alpha = 0.76f), style = MaterialTheme.typography.bodySmall)
+        }
+        MastgEvidenceTable(buildMastgRows(dashboard), leftName, rightName, leftColors.accent, rightColors.accent)
+    }
+}
+
+@Composable
+private fun MastgGauge(title: String, score: Float?, color: Color, modifier: Modifier = Modifier) {
+    val boundedScore = score?.coerceIn(0f, 1f) ?: 0f
+    val animatedScore by animateFloatAsState(targetValue = boundedScore, label = "mastg-gauge")
+    DashboardCard(modifier) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            Text(title, color = color, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Box(contentAlignment = Alignment.Center) {
+                Canvas(modifier = Modifier.size(112.dp)) {
+                    val stroke = 13.dp.toPx()
+                    val diameter = size.minDimension - stroke
+                    val topLeftOffset = Offset((size.width - diameter) / 2f, (size.height - diameter) / 2f)
+                    val arcSizeDimension = Size(diameter, diameter)
+                    drawArc(
+                        color = PiCheckCardBorder,
+                        startAngle = 135f,
+                        sweepAngle = 270f,
+                        useCenter = false,
+                        topLeft = topLeftOffset,
+                        size = arcSizeDimension,
+                        style = Stroke(stroke, cap = StrokeCap.Round)
+                    )
+                    drawArc(
+                        color = if (score == null) PiCheckCardBorder else color,
+                        startAngle = 135f,
+                        sweepAngle = 270f * animatedScore,
+                        useCenter = false,
+                        topLeft = topLeftOffset,
+                        size = arcSizeDimension,
+                        style = Stroke(stroke, cap = StrokeCap.Round)
+                    )
+                }
+                Text(score?.let { "${(boundedScore * 100).toInt()}%" } ?: "Pendiente", color = if (score == null) PiCheckLegacyGray else color, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+            }
+            Text("Índice MASTG", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+private fun MastgEvidenceTable(rows: List<MastgTestRow>, leftName: String, rightName: String, leftColor: Color, rightColor: Color) {
     DashboardCard {
         Text("Evidencias MobSF asociadas a MASTG", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        MastgLegend()
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Prueba MASTG", Modifier.weight(1.8f), fontWeight = FontWeight.Bold, color = PiCheckDarkText)
-            MastgSideHeader(left, leftColors, Modifier.weight(1f))
-            MastgSideHeader(right, rightColors, Modifier.weight(1f))
+            Text(leftName, Modifier.weight(1f), fontWeight = FontWeight.Bold, color = leftColor, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(rightName, Modifier.weight(1f), fontWeight = FontWeight.Bold, color = rightColor, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
         }
         rows.forEach { row ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -442,42 +455,14 @@ private fun MastgEvidenceTable(rows: List<MastgTestRow>, left: DashboardSide, ri
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { MastgStatusDot(row.rightStatus) }
             }
         }
-        Spacer(Modifier.height(2.dp))
-        MastgLegend()
-    }
-}
-
-@Composable
-private fun MastgSideHeader(side: DashboardSide, colors: ComparisonSideColors, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        AppIcon(side.icon, appDisplayName(side), colors.accent, size = 32.dp)
-        Text(
-            text = appDisplayName(side),
-            color = colors.accent,
-            fontWeight = FontWeight.ExtraBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = "v${side.version ?: "N/D"}",
-            color = PiCheckDarkText.copy(alpha = 0.78f),
-            style = MaterialTheme.typography.labelSmall,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        ModelChip(modelDisplay(side.integrationModel), colors.modelColor, compact = true)
     }
 }
 
 @Composable
 private fun MastgStatusDot(status: MastgTestStatus) {
     when (status) {
-        MastgTestStatus.NOT_EVALUABLE -> Text("—", color = PiCheckLegacyGray, fontWeight = FontWeight.ExtraBold)
-        MastgTestStatus.ERROR -> Text("✕", color = PiCheckRiskHigh, fontWeight = FontWeight.ExtraBold)
+        MastgTestStatus.NOT_EVALUABLE -> Text("—", color = PiCheckLegacyGray, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+        MastgTestStatus.ERROR -> Text("✕", color = PiCheckRiskHigh, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
         else -> Box(Modifier.size(14.dp).clip(CircleShape).background(statusColor(status)))
     }
 }
@@ -493,7 +478,7 @@ private fun DashboardCard(modifier: Modifier = Modifier, content: @Composable Co
 private fun DiagnosticCard() = EmptyState("No se han podido calcular métricas para el dashboard.\nRevisa Logcat con tag PiCheckDashboard.")
 
 @Composable
-private fun EmptyState(message: String) { Text(message, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(PiCheckLegacyBg).padding(12.dp), color = PiCheckLegacyGray, style = MaterialTheme.typography.bodyMedium) }
+private fun EmptyState(message: String) { Text(message, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(PiCheckLegacyBg).padding(12.dp), color = PiCheckLegacyGray, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center) }
 
 private fun buildMastgRows(dashboard: ComparisonDashboard?): List<MastgTestRow> {
     fun metric(name: String) = (dashboard?.privacyMetrics.orEmpty() + dashboard?.securityMetrics.orEmpty() + dashboard?.exposureMetrics.orEmpty()).firstOrNull { it.label.contains(name, true) }
@@ -534,37 +519,32 @@ private fun sideDisplayName(side: DashboardSide): String =
     listOfNotNull(appDisplayName(side), side.version?.let { "v$it" }).joinToString(" ")
 
 private fun appDisplayName(side: DashboardSide): String {
-    val candidates = listOf(side.name, side.appName, side.title, side.label)
-    return candidates.firstOrNull { !isBadDisplayName(it) }
-        ?: side.appId
-        ?: "Aplicación"
+    val candidates = listOf(side.name, side.appName, side.title, side.label, side.appId)
+    return candidates.firstOrNull { value ->
+        !value.isNullOrBlank() && !value.isIntegrationModelLabel()
+    } ?: side.appId ?: "Aplicación"
 }
 
-private fun DashboardSide.withHeaderNameFallback(headerAppName: String?): DashboardSide {
-    if (headerAppName == null || !isBadDisplayName(name) || !isBadDisplayName(appName) || !isBadDisplayName(title)) {
-        return this
-    }
-    return copy(name = headerAppName, appName = headerAppName, title = headerAppName)
-}
+private fun String.isIntegrationModelLabel(): Boolean =
+    equals("Health Connect", ignoreCase = true) ||
+            equals("Legacy", ignoreCase = true) ||
+            equals("HEALTH_CONNECT", ignoreCase = true) ||
+            equals("health_connect", ignoreCase = true) ||
+            equals("HC", ignoreCase = true) ||
+            equals("L", ignoreCase = true)
 
 private fun isBadDisplayName(value: String?): Boolean {
     if (value.isNullOrBlank()) return true
-    val clean = value.trim()
-    return clean.equals("Health Connect", ignoreCase = true) ||
-            clean.equals("Legacy", ignoreCase = true) ||
-            clean.equals("HEALTH_CONNECT", ignoreCase = true) ||
-            clean.equals("LEGACY", ignoreCase = true) ||
-            clean.equals("health_connect", ignoreCase = true) ||
-            clean.equals("legacy", ignoreCase = true) ||
-            clean.equals("HC", ignoreCase = true) ||
-            clean.equals("L", ignoreCase = true) ||
-            clean.endsWith(".apk", ignoreCase = true) ||
-            clean.endsWith(".xapk", ignoreCase = true) ||
-            clean.endsWith(".apks", ignoreCase = true) ||
-            (clean.contains("@") && (clean.contains(".apk", ignoreCase = true) || clean.contains(".xapk", ignoreCase = true))) ||
-            clean.startsWith("/app/artifacts/") ||
-            clean.startsWith("http://") ||
-            clean.startsWith("https://")
+    return value.isIntegrationModelLabel()
+}
+
+private fun DashboardSide.withHeaderNameFallback(fallbackName: String?): DashboardSide {
+    if (fallbackName.isNullOrBlank()) return this
+    return this.copy(
+        name = if (this.name.isNullOrBlank()) fallbackName else this.name,
+        appName = if (this.appName.isNullOrBlank()) fallbackName else this.appName,
+        title = if (this.title.isNullOrBlank()) fallbackName else this.title
+    )
 }
 
 private fun valueLabel(value: Float?): String = when { value == null -> "N/D"; value % 1f == 0f -> value.toInt().toString(); else -> "%.1f".format(value) }
