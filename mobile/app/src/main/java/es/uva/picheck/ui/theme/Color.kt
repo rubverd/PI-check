@@ -15,8 +15,8 @@ val PiCheckBurgundy = Color(0xFFA50044)
 val PiCheckDarkText = Color(0xFF0E2A47)
 val PiCheckBackground = Color(0xFFF7F8FA)
 val PiCheckCardBorder = Color(0xFFE0E3EB)
-// Paleta para modelos de integración
 
+// Paleta para modelos de integración
 // Health Connect: tecnológico, vivo y seguro
 val PiCheckHCBlue = Color(0xFF2D5BFF)
 val PiCheckHCCyan = Color(0xFF00C9FF)
@@ -28,19 +28,20 @@ val PiCheckLegacyGray = Color(0xFF7A869A)
 val PiCheckLegacyDark = Color(0xFF4A5568)
 val PiCheckLegacyBg = Color(0xFFF1F5F9)
 
-val PiCheckCompareLeft = Color(0xFF3B82F6)
-val PiCheckCompareLeftBg = Color(0xFFEFF6FF)
+// Configuración del modo espejo para comparativas (Izquierda vs Derecha)
+val PiCheckCompareLeft = Color(0xFF3B82F6)   // Azul nítido para el lado izquierdo
+val PiCheckCompareLeftBg = Color(0xFFEFF6FF) // Fondo celeste sutil izquierdo
 
-val PiCheckCompareRight = Color(0xFF6D28D9)
-val PiCheckCompareRightBg = Color(0xFFF5F3FF)
+val PiCheckCompareRight = Color(0xFFC94C5C)   // Rojo coral apagado profesional equilibrado con el granate
+val PiCheckCompareRightBg = Color(0xFFFFF5F5) // Fondo rosado/blanquecino muy suave de alta legibilidad
 
-val PiCheckModelLegacy = Color(0xFF111827)
-val PiCheckModelNeutral = Color(0xFF6B7280)
+val PiCheckHealthConnect = Color(0xFF2D5BFF)
+val PiCheckHealthConnectBg = Color(0xFFF0F4FF)
+val PiCheckLegacy = Color(0xFF7A869A)
 
-val PiCheckHealthConnect = Color(0xFF2563EB)
-val PiCheckHealthConnectBg = Color(0xFFEFF6FF)
+val PiCheckModelLegacy = Color(0xFF4A5568)
+val PiCheckModelNeutral = Color(0xFF7A869A)
 
-val PiCheckLegacy = Color(0xFF64748B)
 val PiCheckRiskHigh = Color(0xFFDC2626)
-val PiCheckWarning = Color(0xFFF59E0B)
 val PiCheckSuccess = Color(0xFF16A34A)
+val PiCheckWarning = Color(0xFFEAB308)

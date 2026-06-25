@@ -215,7 +215,15 @@ private fun CompactComparisonHeader(left: DashboardSide, right: DashboardSide, l
 @Composable
 private fun CompactSideSummary(side: DashboardSide, colors: ComparisonSideColors, modifier: Modifier = Modifier) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("${appDisplayName(side)} ${side.version?.let { "v$it" }.orEmpty()}", color = colors.accent, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        Text(
+            text = "${appDisplayName(side)} ${side.version?.let { "v$it" }.orEmpty()}",
+            modifier = Modifier.fillMaxWidth(),
+            color = colors.accent,
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
         Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
             ModelChip(modelDisplay(side.integrationModel), colors.modelColor, compact = true)
             Text("MobSF ${compactMobsfStatus(side.mobsfStatus)}", color = PiCheckModelNeutral, style = MaterialTheme.typography.labelSmall, maxLines = 1)
@@ -303,12 +311,12 @@ private fun ComparedAppCard(side: DashboardSide, sideLabel: String, colors: Comp
     val model = modelDisplay(side.integrationModel)
     Card(modifier = modifier, shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, colors.border), colors = CardDefaults.cardColors(containerColor = colors.background)) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(sideLabel, color = colors.accent, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+            Text(sideLabel, modifier = Modifier.fillMaxWidth(), color = colors.accent, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
             AppIcon(side.icon, appName, colors.accent)
-            Text(appName, color = colors.accent, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-            Text("Versión ${side.version ?: "N/D"}", color = PiCheckDarkText, fontWeight = FontWeight.SemiBold, maxLines = 1, textAlign = TextAlign.Center)
+            Text(appName, modifier = Modifier.fillMaxWidth(), color = colors.accent, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text("Versión ${side.version ?: "N/D"}", modifier = Modifier.fillMaxWidth(), color = PiCheckDarkText, fontWeight = FontWeight.SemiBold, maxLines = 1, textAlign = TextAlign.Center)
             ModelChip(model, colors.modelColor)
-            Text("MobSF: ${side.mobsfStatus ?: "N/D"}", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall, maxLines = 1, textAlign = TextAlign.Center)
+            Text("MobSF: ${side.mobsfStatus ?: "N/D"}", modifier = Modifier.fillMaxWidth(), color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall, maxLines = 1, textAlign = TextAlign.Center)
         }
     }
 }
@@ -405,7 +413,7 @@ private fun MastgGauge(title: String, score: Float?, color: Color, modifier: Mod
     val animatedScore by animateFloatAsState(targetValue = boundedScore, label = "mastg-gauge")
     DashboardCard(modifier) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Text(title, color = color, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(title, modifier = Modifier.fillMaxWidth(), color = color, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
             Box(contentAlignment = Alignment.Center) {
                 Canvas(modifier = Modifier.size(112.dp)) {
                     val stroke = 13.dp.toPx()
