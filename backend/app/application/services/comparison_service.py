@@ -441,6 +441,9 @@ def _dashboard_header_side(
     model = version.modelo_integracion.value
     return {
         "label": _dashboard_side_title(report),
+        "name": prepared.application.nombre,
+        "app_name": prepared.application.nombre,
+        "title": prepared.application.nombre,
         "app_id": version.id_app,
         "version": version.version,
         "version_code": version.version_code,

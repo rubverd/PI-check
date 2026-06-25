@@ -34,6 +34,9 @@ data class DashboardHeader(
 
 data class DashboardSide(
     val label: String? = null,
+    val name: String? = null,
+    val appName: String? = null,
+    val title: String? = null,
     val appId: String? = null,
     val version: String? = null,
     val versionCode: Int? = null,
@@ -106,3 +109,21 @@ data class DashboardTechnicalSummary(
     val rightReportSizeBytes: Long? = null,
     val rawReportInResponse: Boolean? = null,
 )
+
+
+data class MastgTestRow(
+    val id: String,
+    val title: String,
+    val relationType: String,
+    val leftStatus: MastgTestStatus,
+    val rightStatus: MastgTestStatus,
+    val evidence: String? = null,
+)
+
+enum class MastgTestStatus {
+    PASS,
+    FAIL,
+    REVIEW,
+    NOT_EVALUABLE,
+    ERROR
+}
