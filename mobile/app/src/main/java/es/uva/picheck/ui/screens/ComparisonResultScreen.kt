@@ -46,8 +46,10 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import es.uva.picheck.data.model.ComparisonDashboard
 import es.uva.picheck.data.model.DashboardMetric
@@ -420,6 +422,7 @@ private fun MastgGauge(side: DashboardSide, score: Float?, colors: ComparisonSid
             }
             Text("Índice MASTG", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall)
         }
+        Text(valueLabel, modifier = Modifier.width(62.dp), color = PiCheckDarkText, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End)
     }
 }
 
