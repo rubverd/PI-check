@@ -62,7 +62,7 @@ class MastgEvaluationModel(Base):
             ondelete="CASCADE",
         ),
         CheckConstraint(
-            "resultado IN ('PASS', 'FAIL', 'ERROR', 'NOT_APPLICABLE', 'NOT_EXECUTED')",
+            "resultado IN ('PASS', 'FAIL', 'REVIEW', 'ERROR', 'NOT_EVALUABLE', 'NOT_APPLICABLE', 'NOT_EXECUTED')",
             name="ck_evaluar_resultado",
         ),
     )
