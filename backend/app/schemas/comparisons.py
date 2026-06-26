@@ -23,6 +23,7 @@ class ComparisonRequest(BaseModel):
     app_a: SelectedAppMetadata
     app_b: SelectedAppMetadata
     download_apks: bool = True
+    mastg_index_id: str = "picheck_mhealth_v1"
 
 
 class ApkDownloadInfo(BaseModel):

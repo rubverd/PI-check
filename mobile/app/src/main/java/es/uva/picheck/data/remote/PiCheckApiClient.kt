@@ -10,6 +10,7 @@ import es.uva.picheck.data.model.DashboardSide
 import es.uva.picheck.data.model.DashboardTechnicalSummary
 import es.uva.picheck.data.model.DashboardVerdictCard
 import es.uva.picheck.data.model.DashboardMetric
+import es.uva.picheck.data.model.MastgIndexOption
 import es.uva.picheck.data.model.MastgScore
 import es.uva.picheck.data.model.PermissionDiff
 import es.uva.picheck.data.model.QuickKpi
@@ -49,6 +50,7 @@ object PiCheckApiClient {
     private val BASE_URL = ApiEnvironment.BASE_URL
     private const val MAX_RESPONSE_BODY_BYTES = 10 * 1024 * 1024
     private const val DASHBOARD_LOG_TAG = "PiCheckDashboard"
+    const val DEFAULT_MASTG_INDEX_ID = "picheck_mhealth_v1"
     private const val DASHBOARD_DEBUG = true
 
     suspend fun searchApps(query: String): List<PlayStoreApp> = withContext(Dispatchers.IO) {
@@ -62,15 +64,32 @@ object PiCheckApiClient {
         }
     }
 
+
+    suspend fun getMastgIndexes(): List<MastgIndexOption> = withContext(Dispatchers.IO) {
+        val response = get("/api/mastg/indexes")
+        val array = JSONArray(response)
+        List(array.length()) { index ->
+            val item = array.getJSONObject(index)
+            MastgIndexOption(
+                id = item.optString("id_indice"),
+                name = item.optString("nombre", item.optString("id_indice")),
+                description = item.optNullableString("descripcion"),
+                testCount = item.optIntOrNull("total_pruebas"),
+            )
+        }
+    }
+
     suspend fun requestComparison(
         appA: PlayStoreApp,
         appB: PlayStoreApp,
         downloadApks: Boolean,
+        mastgIndexId: String = DEFAULT_MASTG_INDEX_ID,
     ): PiCheckComparisonAnalysis = withContext(Dispatchers.IO) {
         val body = JSONObject()
             .put("app_a", appA.toComparisonJson())
             .put("app_b", appB.toComparisonJson())
             .put("download_apks", downloadApks)
+            .put("mastg_index_id", mastgIndexId)
 
         val response = post("/api/comparisons/request", body)
         response.logComparisonResponseDiagnostics()
@@ -1238,3 +1257,5 @@ object PiCheckApiClient {
         }
     }
 }
+
+private fun JSONObject.optIntOrNull(name: String): Int? = if (has(name) && !isNull(name)) optInt(name) else null
