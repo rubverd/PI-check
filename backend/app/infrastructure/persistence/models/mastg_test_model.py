@@ -32,6 +32,21 @@ class MastgTestModel(Base):
         nullable=True,
     )
 
+    descripcion: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    origen: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    tipo_relacion: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
     resultados = relationship(
         "MastgEvaluationModel",
         back_populates="prueba_mastg",
