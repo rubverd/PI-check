@@ -69,3 +69,18 @@ nginx/certs/picheck-server.openssl.cnf
 nginx/certs/server.crt
 nginx/certs/server_cert.cnf
 nginx/certs/backup_*/
+# PI-check generated artifacts
+/backend/artifacts/comparisons/*.json
+/backend/artifacts/public/icons/**
+/backend/artifacts/reports/mastg/**
+/backend/artifacts/tmp/**
+/backend/artifacts/manual_uploads/**
+/backups/db/*.sql
+
+# Local snapshots
+/backend_tree.txt
+/docs/dev_snapshots/*.txt
+
+!/backend/artifacts/apks/.gitkeep
+!/backend/artifacts/manual_uploads/.gitkeep
+!/backend/artifacts/tmp/uploads/.gitkeep
