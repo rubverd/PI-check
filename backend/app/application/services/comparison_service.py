@@ -9,7 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
-
+from app.application.services.mastg.mastg_evaluation_service import MastgEvaluationService
 from app.application.services.app_analysis_service import AppAnalysisService
 from app.application.services.app_registration_service import (
     AppRegistrationService,
@@ -123,6 +123,17 @@ class ComparisonService:
             comparison_payload=comparison_payload,
         )
         technical_summary = _build_technical_summary(report_a, report_b)
+        
+        mastg_payload = _evaluate_mastg_for_comparison(
+            db=self.db,
+            report_a=report_a,
+            report_b=report_b,
+            index_id="picheck_mhealth_v1",
+            messages=messages,
+        )
+        _apply_mastg_to_dashboard(dashboard_payload, mastg_payload)
+        comparison.id_indice_aplicado = mastg_payload.get("index_id")
+
         artifact_path = _save_temporary_comparison_payload(
             comparison_payload,
             dashboard_payload,
@@ -1151,3 +1162,216 @@ def _save_temporary_comparison_payload(
 def _safe_filename_part(value: str | None) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "unknown").strip())
     return cleaned[:80] or "unknown"
+
+def _evaluate_mastg_for_comparison(
+    db: Session,
+    report_a: VersionReport,
+    report_b: VersionReport,
+    index_id: str,
+    messages: list[str],
+) -> dict[str, Any]:
+    service = MastgEvaluationService(db)
+
+    left_result = service.evaluate_version(
+        index_id=index_id,
+        id_app=report_a.version_app.id_app,
+        version=report_a.version_app.version,
+    )
+    messages.append(
+        "[MASTG] Evaluación completada para "
+        f"{report_a.version_app.id_app}:{report_a.version_app.version} "
+        f"con índice {index_id}."
+    )
+
+    right_result = service.evaluate_version(
+        index_id=index_id,
+        id_app=report_b.version_app.id_app,
+        version=report_b.version_app.version,
+    )
+    messages.append(
+        "[MASTG] Evaluación completada para "
+        f"{report_b.version_app.id_app}:{report_b.version_app.version} "
+        f"con índice {index_id}."
+    )
+
+    return {
+        "index_id": index_id,
+        "label": left_result.get("index", {}).get("nombre") or index_id,
+        "left": left_result,
+        "right": right_result,
+        "tests": _merge_mastg_test_results(
+            left_result.get("results", []),
+            right_result.get("results", []),
+        ),
+    }
+
+
+def _apply_mastg_to_dashboard(
+    dashboard_payload: dict[str, Any],
+    mastg_payload: dict[str, Any],
+) -> None:
+    left_score = _mastg_score_value(mastg_payload.get("left"))
+    right_score = _mastg_score_value(mastg_payload.get("right"))
+    left_coverage = _mastg_coverage_value(mastg_payload.get("left"))
+    right_coverage = _mastg_coverage_value(mastg_payload.get("right"))
+
+    label = mastg_payload.get("label") or "Índice MASTG"
+    index_id = mastg_payload.get("index_id")
+
+    dashboard_payload["mastg"] = {
+        "left_score": left_score,
+        "right_score": right_score,
+        "left_coverage": left_coverage,
+        "right_coverage": right_coverage,
+        "status": "completed",
+        "label": label,
+        "index_id": index_id,
+        "tests": mastg_payload.get("tests", []),
+        "left_summary": _mastg_status_summary(mastg_payload.get("left")),
+        "right_summary": _mastg_status_summary(mastg_payload.get("right")),
+    }
+
+    # Alias legacy usado por la pantalla Kotlin actual.
+    dashboard_payload["mastg_score"] = {
+        "left": left_score,
+        "right": right_score,
+        "left_coverage": left_coverage,
+        "right_coverage": right_coverage,
+        "status": "completed",
+        "label": label,
+        "index_id": index_id,
+    }
+
+
+def _mastg_score_value(result: Any) -> float | None:
+    if not isinstance(result, dict):
+        return None
+
+    score = result.get("score", {}).get("score")
+
+    if score is None:
+        return None
+
+    return float(score)
+
+
+def _mastg_coverage_value(result: Any) -> float | None:
+    if not isinstance(result, dict):
+        return None
+
+    coverage = result.get("score", {}).get("coverage")
+
+    if coverage is None:
+        return None
+
+    return float(coverage)
+
+
+def _mastg_status_summary(result: Any) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+
+    score = result.get("score", {})
+
+    if not isinstance(score, dict):
+        return {}
+
+    return {
+        "score": score.get("score"),
+        "score_percent": score.get("score_percent"),
+        "coverage": score.get("coverage"),
+        "coverage_percent": score.get("coverage_percent"),
+        "total_tests": score.get("total_tests"),
+        "scorable_tests": score.get("scorable_tests"),
+        "status_summary": score.get("status_summary", {}),
+    }
+
+
+def _merge_mastg_test_results(
+    left_results: list[dict[str, Any]],
+    right_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_id: dict[str, dict[str, Any]] = {}
+
+    for item in left_results:
+        id_mastg = item.get("id_mastg")
+        if not id_mastg:
+            continue
+
+        by_id.setdefault(
+            id_mastg,
+            {
+                "id": id_mastg,
+                "title": item.get("nombre") or id_mastg,
+                "relation": item.get("tipo_relacion") or item.get("origen"),
+                "category": item.get("categoria_masvs"),
+                "origin": item.get("origen"),
+                "left_status": None,
+                "right_status": None,
+                "left_summary": None,
+                "right_summary": None,
+                "left_recommendation": None,
+                "right_recommendation": None,
+                "left_result_json": None,
+                "right_result_json": None,
+            },
+        )
+
+        by_id[id_mastg].update(
+            {
+                "left_status": _normalize_mastg_status_for_android(item.get("resultado")),
+                "left_summary": item.get("summary"),
+                "left_recommendation": item.get("recommendation"),
+                "left_result_json": item.get("ruta_resultado_json"),
+            }
+        )
+
+    for item in right_results:
+        id_mastg = item.get("id_mastg")
+        if not id_mastg:
+            continue
+
+        by_id.setdefault(
+            id_mastg,
+            {
+                "id": id_mastg,
+                "title": item.get("nombre") or id_mastg,
+                "relation": item.get("tipo_relacion") or item.get("origen"),
+                "category": item.get("categoria_masvs"),
+                "origin": item.get("origen"),
+                "left_status": None,
+                "right_status": None,
+                "left_summary": None,
+                "right_summary": None,
+                "left_recommendation": None,
+                "right_recommendation": None,
+                "left_result_json": None,
+                "right_result_json": None,
+            },
+        )
+
+        by_id[id_mastg].update(
+            {
+                "right_status": _normalize_mastg_status_for_android(item.get("resultado")),
+                "right_summary": item.get("summary"),
+                "right_recommendation": item.get("recommendation"),
+                "right_result_json": item.get("ruta_resultado_json"),
+            }
+        )
+
+    return [
+        by_id[id_mastg]
+        for id_mastg in sorted(by_id)
+    ]
+
+
+def _normalize_mastg_status_for_android(value: Any) -> str:
+    normalized = str(value or "NOT_EVALUABLE").upper()
+
+    if normalized in {"PASS", "FAIL", "REVIEW", "ERROR", "NOT_EVALUABLE"}:
+        return normalized
+
+    if normalized in {"NOT_EXECUTED", "NOT_APPLICABLE"}:
+        return "NOT_EVALUABLE"
+
+    return "NOT_EVALUABLE"
