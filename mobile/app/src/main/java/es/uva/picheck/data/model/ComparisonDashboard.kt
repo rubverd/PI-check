@@ -127,3 +127,11 @@ enum class MastgTestStatus {
     NOT_EVALUABLE,
     ERROR
 }
+
+
+data class MastgIndexOption(
+    val id: String,
+    val name: String,
+    val description: String? = null,
+    val testCount: Int? = null,
+)

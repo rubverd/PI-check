@@ -7,6 +7,7 @@ from app.application.services.app_analysis_service import AppAnalysisError
 from app.application.services.app_registration_service import AppRegistrationError
 from app.application.services.comparison_service import (
     ComparisonExecutionResult,
+    ComparisonMastgError,
     ComparisonService,
 )
 from app.domain.entities.version_report import VersionReport
@@ -39,6 +40,16 @@ def request_comparison(
         db.commit()
 
         return _to_response(result)
+
+    except ComparisonMastgError as exc:
+        db.rollback()
+
+        logger.exception("Error controlado aplicando MASTG en comparativa")
+
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        )
 
     except (AppRegistrationError, AppAnalysisError) as exc:
         db.rollback()

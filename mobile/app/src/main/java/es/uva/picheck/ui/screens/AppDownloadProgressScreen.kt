@@ -105,7 +105,7 @@ fun AppDownloadProgressScreen(
                     progress < 0.42f -> "Comprobando análisis previos..."
                     progress < 0.65f -> "Descargando APKs si es necesario..."
                     progress < 0.82f -> "Generando informes MobSF..."
-                    else -> "Construyendo comparativa..."
+                    else -> "Ejecutando índice PI-check/MASTG..."
                 }
 
                 detailMessage = when {
@@ -113,7 +113,7 @@ fun AppDownloadProgressScreen(
                     progress < 0.42f -> "El backend comprueba si ya existen versiones analizadas."
                     progress < 0.65f -> "Si no existe análisis previo, se descarga el APK correspondiente."
                     progress < 0.82f -> "MobSF analiza las aplicaciones y genera informes JSON."
-                    else -> "La respuesta final se mostrará al completar el proceso."
+                    else -> "La app espera a que backend complete el índice antes de mostrar resultados."
                 }
             }
         }
