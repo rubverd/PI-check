@@ -83,4 +83,4 @@ nginx/certs/backup_*/
 
 !/backend/artifacts/apks/.gitkeep
 !/backend/artifacts/manual_uploads/.gitkeep
-!/backend/artifacts/tmp/uploads/.gitkeep
+!/backend/artifacts/tmp/uploads/.gitkeep/docs/dev_samples/
