@@ -566,11 +566,13 @@ class AppRegistrationService:
         extracted_icon: str | None,
         existing_icon: str | None,
     ) -> str | None:
-        if explicit_icon:
-            return explicit_icon
-        if existing_icon:
-            return existing_icon
-        return extracted_icon
+        if explicit_icon and not _is_invalid_android_icon(explicit_icon):
+            return explicit_icon.strip()
+        if existing_icon and not _is_invalid_android_icon(existing_icon):
+            return existing_icon.strip()
+        if extracted_icon and not _is_invalid_android_icon(extracted_icon):
+            return extracted_icon.strip()
+        return None
 
     def _find_selected_existing_version(
         self,
@@ -1032,7 +1034,7 @@ def _is_bad_generated_name(value: str, app_id: str) -> bool:
     if not normalized:
         return True
 
-    if re.match(r"^[0-9a-f]{16,}[_-]", lower):
+    if re.fullmatch(r"[0-9a-f]{16,}", lower) or re.match(r"^[0-9a-f]{16,}[_-]", lower):
         return True
 
     if "@" in normalized and app_lower in lower:
@@ -1044,7 +1046,21 @@ def _is_bad_generated_name(value: str, app_id: str) -> bool:
     if lower.startswith("upload.") or lower.startswith("manual."):
         return True
 
+    if lower.endswith(".apk") or lower.endswith(".xapk") or lower.endswith(".apks") or lower.endswith(".apkm"):
+        return True
+
     return False
+
+
+def _is_invalid_android_icon(value: str | None) -> bool:
+    if value is None:
+        return True
+
+    icon = value.strip()
+    if not icon:
+        return True
+
+    return icon.startswith("/app/")
 
 
 def _selected_app_key(selected_app: SelectedAppMetadata) -> str:

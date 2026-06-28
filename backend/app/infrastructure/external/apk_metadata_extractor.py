@@ -7,6 +7,9 @@ import re
 import shutil
 import subprocess
 import zipfile
+from io import BytesIO
+
+from PIL import Image
 
 from app.domain.value_objects.integration_model import IntegrationModel
 
@@ -76,12 +79,19 @@ def extract_apk_metadata(
     icon_url = None
 
     if extract_icon and metadata_apk_path is not None:
-        icon_url = _extract_icon_to_public_storage(
-            apk_path=metadata_apk_path,
-            preferred_icon_path=aapt_metadata.get("icon_path"),
-            id_app=id_app,
-            version=version,
-        )
+        try:
+            icon_url = _extract_icon_to_public_storage(
+                apk_path=metadata_apk_path,
+                preferred_icon_paths=aapt_metadata.get("icon_paths", []),
+                id_app=id_app,
+                version=version,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[ICON] No se pudo extraer/normalizar icono para %s: %s",
+                metadata_apk_path,
+                exc,
+            )
 
     modelo_integracion = detect_integration_model(apk_path)
 
@@ -266,7 +276,7 @@ def _apk_member_priority(member: zipfile.ZipInfo) -> tuple[int, int]:
     return (5, -member.file_size)
 
 
-def _extract_with_aapt(apk_path: Path) -> dict[str, str]:
+def _extract_with_aapt(apk_path: Path) -> dict[str, object]:
     if apk_path.suffix.lower() != ".apk":
         return {}
 
@@ -325,8 +335,8 @@ def _extract_with_aapt(apk_path: Path) -> dict[str, str]:
     return {}
 
 
-def _parse_aapt_badging(output: str) -> dict[str, str]:
-    metadata: dict[str, str] = {}
+def _parse_aapt_badging(output: str) -> dict[str, object]:
+    metadata: dict[str, object] = {}
 
     package_line = next(
         (line for line in output.splitlines() if line.startswith("package:")),
@@ -350,20 +360,20 @@ def _parse_aapt_badging(output: str) -> dict[str, str]:
         metadata["version_name"] = version_name
 
     app_label = _extract_application_label(output)
-    icon_path = _extract_application_icon_path(output)
+    icon_paths = _extract_application_icon_paths(output)
 
     if app_label:
         metadata["app_label"] = app_label
 
-    if icon_path:
-        metadata["icon_path"] = icon_path
+    if icon_paths:
+        metadata["icon_paths"] = icon_paths
 
     return metadata
 
 
 
 def _extract_application_label(output: str) -> str | None:
-    for prefix in ("application-label:", "application-label-es:", "application-label-en:"):
+    for prefix in ("application-label-es:", "application-label:", "application-label-en:"):
         line = next((line for line in output.splitlines() if line.startswith(prefix)), None)
         if line:
             label = _extract_first_quoted_value(line)
@@ -375,29 +385,40 @@ def _extract_application_label(output: str) -> str | None:
         None,
     )
     if application_line:
-        return _extract_quoted_value(application_line, "label")
+        label = _extract_quoted_value(application_line, "label")
+        if label:
+            return label
+
+    launcher_line = next(
+        (line for line in output.splitlines() if "launchable-activity:" in line),
+        None,
+    )
+    if launcher_line:
+        return _extract_quoted_value(launcher_line, "label")
 
     return None
 
 
-def _extract_application_icon_path(output: str) -> str | None:
-    icon_lines = [
-        line
-        for line in output.splitlines()
-        if line.startswith("application-icon-") or line.startswith("application:")
-    ]
-    candidates: list[tuple[int, str]] = []
+def _extract_application_icon_paths(output: str) -> list[str]:
+    density_candidates: list[tuple[int, str]] = []
+    fallback_candidates: list[str] = []
 
-    for line in icon_lines:
-        icon_path = _extract_first_quoted_value(line) if line.startswith("application-icon-") else _extract_quoted_value(line, "icon")
-        if not icon_path:
+    for line in output.splitlines():
+        density_match = re.match(r"application-icon-(\d+):'([^']+)'", line)
+        if density_match:
+            icon_path = density_match.group(2)
+            if _is_raster_icon_path(icon_path):
+                density_candidates.append((int(density_match.group(1)), icon_path))
             continue
-        candidates.append((_icon_path_score(icon_path), icon_path))
 
-    if not candidates:
-        return None
+        if line.startswith("application:"):
+            icon_path = _extract_quoted_value(line, "icon")
+            if icon_path and _is_raster_icon_path(icon_path):
+                fallback_candidates.append(icon_path)
 
-    return sorted(candidates, reverse=True)[0][1]
+    ordered = [path for _, path in sorted(density_candidates, key=lambda item: item[0], reverse=True)]
+    ordered.extend(path for path in fallback_candidates if path not in ordered)
+    return ordered
 
 
 def _extract_first_quoted_value(text: str) -> str | None:
@@ -409,7 +430,7 @@ def _extract_first_quoted_value(text: str) -> str | None:
 
 def _extract_icon_to_public_storage(
     apk_path: Path,
-    preferred_icon_path: str | None,
+    preferred_icon_paths: list[str],
     id_app: str,
     version: str,
 ) -> str | None:
@@ -417,7 +438,7 @@ def _extract_icon_to_public_storage(
         return None
 
     with zipfile.ZipFile(apk_path, "r") as archive:
-        member = _select_icon_member(archive, preferred_icon_path)
+        member = _select_icon_member(archive, preferred_icon_paths)
         if member is None:
             logger.info("[ICON] No se encontró icono PNG/WEBP extraíble en %s", apk_path)
             return None
@@ -426,10 +447,18 @@ def _extract_icon_to_public_storage(
         public_root = Path("/app/artifacts/public")
         output_dir = public_root / "icons" / _safe_path_part(id_app) / _safe_path_part(version)
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"icon{suffix}"
+        output_path = output_dir / "icon.png"
 
-        with archive.open(member, "r") as source, output_path.open("wb") as target:
-            shutil.copyfileobj(source, target)
+        with archive.open(member, "r") as source:
+            icon_bytes = source.read()
+
+        if suffix == ".png":
+            output_path.write_bytes(icon_bytes)
+        elif suffix == ".webp":
+            with Image.open(BytesIO(icon_bytes)) as image:
+                image.save(output_path, format="PNG")
+        else:
+            return None
 
     logger.info("[ICON] Icono extraído del APK: %s", output_path)
     return f"/static/icons/{_safe_path_part(id_app)}/{_safe_path_part(version)}/{output_path.name}"
@@ -437,13 +466,13 @@ def _extract_icon_to_public_storage(
 
 def _select_icon_member(
     archive: zipfile.ZipFile,
-    preferred_icon_path: str | None,
+    preferred_icon_paths: list[str],
 ) -> zipfile.ZipInfo | None:
     members_by_name = {member.filename: member for member in archive.infolist() if not member.is_dir()}
 
-    if preferred_icon_path:
+    for preferred_icon_path in preferred_icon_paths:
         preferred_member = members_by_name.get(preferred_icon_path)
-        if preferred_member and preferred_member.filename.lower().endswith((".png", ".webp")):
+        if preferred_member and _is_raster_icon_path(preferred_member.filename):
             return preferred_member
 
     candidates = [
@@ -460,7 +489,7 @@ def _select_icon_member(
 
 def _is_icon_raster_candidate(filename: str) -> bool:
     lower = filename.lower()
-    if not lower.endswith((".png", ".webp")):
+    if not _is_raster_icon_path(lower):
         return False
     if not (lower.startswith("res/mipmap") or lower.startswith("res/drawable")):
         return False
@@ -468,6 +497,11 @@ def _is_icon_raster_candidate(filename: str) -> bool:
     name = Path(lower).stem
     keywords = ("ic_launcher", "launcher", "app_icon", "icon")
     return any(keyword in name for keyword in keywords)
+
+
+def _is_raster_icon_path(path: str) -> bool:
+    lower = path.lower()
+    return lower.endswith((".png", ".webp")) and not lower.endswith(".xml")
 
 
 def _icon_path_score(path: str) -> int:

@@ -51,6 +51,15 @@ object PiCheckApiClient {
     }
 
     private val BASE_URL = ApiEnvironment.BASE_URL
+
+    private fun resolveIconUrl(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
+        if (raw.startsWith("/app/")) return null
+        if (raw.startsWith("/")) return BASE_URL.removeSuffix("/") + raw
+        return raw
+    }
+
     private const val MAX_RESPONSE_BODY_BYTES = 10 * 1024 * 1024
     private const val DASHBOARD_LOG_TAG = "PiCheckDashboard"
     const val DEFAULT_MASTG_INDEX_ID = "picheck_mhealth_v1"
@@ -368,7 +377,7 @@ object PiCheckApiClient {
         appId = getString("app_id"),
         title = getString("title"),
         developer = optNullableString("developer"),
-        icon = optNullableString("icon"),
+        icon = resolveIconUrl(optNullableString("icon")),
         score = optNullableDouble("score"),
         genre = optNullableString("genre"),
         free = optNullableBoolean("free"),
@@ -390,7 +399,7 @@ object PiCheckApiClient {
             appId = getString("app_id"),
             name = getString("name"),
             developer = optNullableString("developer"),
-            icon = optNullableString("icon"),
+            icon = resolveIconUrl(optNullableString("icon")),
             version = optString("version", latestVersion?.version ?: "No disponible"),
             category = optString("category", ""),
             analysisDate = optString("analysis_date", optString("version_date", "")),
@@ -569,8 +578,8 @@ object PiCheckApiClient {
             rightIntegrationModel = optNullableString("right_integration_model"),
             leftMobsfStatus = optNullableString("left_mobsf_status"),
             rightMobsfStatus = optNullableString("right_mobsf_status"),
-            leftIcon = optNullableString("left_icon"),
-            rightIcon = optNullableString("right_icon"),
+            leftIcon = resolveIconUrl(optNullableString("left_icon")),
+            rightIcon = resolveIconUrl(optNullableString("right_icon")),
         )
 
     private fun JSONObject.toDashboardSide(): DashboardSide =
@@ -585,7 +594,7 @@ object PiCheckApiClient {
             integrationModel = optNullableString("integration_model"),
             integrationModelShort = optNullableString("integration_model_short"),
             mobsfStatus = optNullableString("mobsf_status"),
-            icon = optNullableString("icon"),
+            icon = resolveIconUrl(optNullableString("icon")),
         )
 
     private fun JSONArray.toVerdictCards(): List<DashboardVerdictCard> =
@@ -776,7 +785,7 @@ object PiCheckApiClient {
                     integrationModel = leftModel,
                     integrationModelShort = modelShortLabel(leftModel),
                     mobsfStatus = leftMeta?.optNullableString("mobsf_status") ?: "SUCCESS",
-                    icon = leftMeta?.optNullableString("icon"),
+                    icon = resolveIconUrl(leftMeta?.optNullableString("icon")),
                 ),
                 right = DashboardSide(
                     label = rightMeta?.optNullableString("name") ?: rightMeta?.optNullableString("title") ?: rightReport.optNullableString("app_name"),
@@ -789,7 +798,7 @@ object PiCheckApiClient {
                     integrationModel = rightModel,
                     integrationModelShort = modelShortLabel(rightModel),
                     mobsfStatus = rightMeta?.optNullableString("mobsf_status") ?: "SUCCESS",
-                    icon = rightMeta?.optNullableString("icon"),
+                    icon = resolveIconUrl(rightMeta?.optNullableString("icon")),
                 ),
             ),
             executiveSummary = buildExecutiveSummary(
