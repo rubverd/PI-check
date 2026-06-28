@@ -10,8 +10,11 @@ import es.uva.picheck.data.model.DashboardSide
 import es.uva.picheck.data.model.DashboardTechnicalSummary
 import es.uva.picheck.data.model.DashboardVerdictCard
 import es.uva.picheck.data.model.DashboardMetric
+import es.uva.picheck.data.model.MastgDashboard
 import es.uva.picheck.data.model.MastgIndexOption
 import es.uva.picheck.data.model.MastgScore
+import es.uva.picheck.data.model.MastgTestRow
+import es.uva.picheck.data.model.MastgTestStatus
 import es.uva.picheck.data.model.PermissionDiff
 import es.uva.picheck.data.model.QuickKpi
 import es.uva.picheck.data.model.TechnicalFinding
@@ -67,7 +70,8 @@ object PiCheckApiClient {
 
     suspend fun getMastgIndexes(): List<MastgIndexOption> = withContext(Dispatchers.IO) {
         val response = get("/api/mastg/indexes")
-        val array = JSONArray(response)
+        val root = JSONObject(response)
+        val array = root.optJSONArray("results") ?: JSONArray(response)
         List(array.length()) { index ->
             val item = array.getJSONObject(index)
             MastgIndexOption(
@@ -77,6 +81,22 @@ object PiCheckApiClient {
                 testCount = item.optIntOrNull("total_pruebas"),
             )
         }
+    }
+
+
+    suspend fun evaluateMastgComparison(
+        leftAppId: String,
+        leftVersion: String,
+        rightAppId: String,
+        rightVersion: String,
+        indexId: String,
+    ): MastgDashboard = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("left", JSONObject().put("id_app", leftAppId).put("version", leftVersion))
+            .put("right", JSONObject().put("id_app", rightAppId).put("version", rightVersion))
+            .put("index_id", indexId)
+        val response = post("/api/mastg/evaluate-comparison", body)
+        JSONObject(response).getJSONObject("mastg").toMastgDashboard()
     }
 
     suspend fun requestComparison(
@@ -442,6 +462,7 @@ object PiCheckApiClient {
 
     private fun JSONObject.toComparisonDashboard(): ComparisonDashboard {
         return ComparisonDashboard(
+            mastg = optJSONObject("mastg")?.toMastgDashboard(),
             mastgScore = parseMastgScore(),
             header = optJSONObject("header")?.toDashboardHeader(),
             executiveSummary = optJSONArray("executive_summary")?.toStringList().orEmpty(),
@@ -463,8 +484,11 @@ object PiCheckApiClient {
             return MastgScore(
                 left = it.optNullableFloat("left_score"),
                 right = it.optNullableFloat("right_score"),
+                leftCoverage = it.optNullableFloat("left_coverage"),
+                rightCoverage = it.optNullableFloat("right_coverage"),
                 status = it.optNullableString("status"),
                 label = it.optNullableString("label"),
+                indexId = it.optNullableString("index_id"),
             )
         }
 
@@ -472,9 +496,64 @@ object PiCheckApiClient {
             MastgScore(
                 left = it.optNullableFloat("left"),
                 right = it.optNullableFloat("right"),
+                leftCoverage = it.optNullableFloat("left_coverage"),
+                rightCoverage = it.optNullableFloat("right_coverage"),
                 status = it.optNullableString("status"),
+                label = it.optNullableString("label"),
+                indexId = it.optNullableString("index_id"),
             )
         }
+    }
+
+
+    private fun JSONObject.toMastgDashboard(): MastgDashboard = MastgDashboard(
+        leftScore = optNullableFloat("left_score"),
+        rightScore = optNullableFloat("right_score"),
+        leftCoverage = optNullableFloat("left_coverage"),
+        rightCoverage = optNullableFloat("right_coverage"),
+        status = optNullableString("status"),
+        label = optNullableString("label"),
+        indexId = optNullableString("index_id"),
+        availableIndexes = optJSONArray("available_indexes")?.toMastgIndexes().orEmpty(),
+        tests = optJSONArray("tests")?.toMastgTestRows().orEmpty(),
+    )
+
+    private fun JSONArray.toMastgIndexes(): List<MastgIndexOption> =
+        List(length()) { index ->
+            val item = getJSONObject(index)
+            MastgIndexOption(
+                id = item.optString("id", item.optString("id_indice")),
+                name = item.optString("name", item.optString("nombre", item.optString("id", item.optString("id_indice")))),
+                description = item.optNullableString("description") ?: item.optNullableString("descripcion"),
+                testCount = item.optIntOrNull("test_count") ?: item.optIntOrNull("total_pruebas"),
+            )
+        }
+
+    private fun JSONArray.toMastgTestRows(): List<MastgTestRow> =
+        List(length()) { index ->
+            val item = getJSONObject(index)
+            MastgTestRow(
+                id = item.optString("id"),
+                title = item.optString("title", item.optString("id")),
+                relationType = item.optString("relation", item.optString("relation_type", "")),
+                category = item.optNullableString("category"),
+                origin = item.optNullableString("origin"),
+                leftSummary = item.optNullableString("left_summary"),
+                rightSummary = item.optNullableString("right_summary"),
+                leftStatus = item.optNullableString("left_status").toMastgTestStatus(),
+                rightStatus = item.optNullableString("right_status").toMastgTestStatus(),
+                evidence = item.optNullableString("left_result_json") ?: item.optNullableString("right_result_json"),
+            )
+        }
+
+    private fun String?.toMastgTestStatus(): MastgTestStatus = when (this?.uppercase()) {
+        "PASS" -> MastgTestStatus.PASS
+        "FAIL" -> MastgTestStatus.FAIL
+        "REVIEW" -> MastgTestStatus.REVIEW
+        "ERROR" -> MastgTestStatus.ERROR
+        "NOT_EXECUTED" -> MastgTestStatus.NOT_EXECUTED
+        "NOT_APPLICABLE" -> MastgTestStatus.NOT_APPLICABLE
+        else -> MastgTestStatus.NOT_EVALUABLE
     }
 
     private fun JSONObject.toDashboardHeader(): DashboardHeader =

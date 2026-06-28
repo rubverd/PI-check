@@ -1,6 +1,7 @@
 package es.uva.picheck.data.model
 
 data class ComparisonDashboard(
+    val mastg: MastgDashboard? = null,
     val mastgScore: MastgScore? = null,
     val header: DashboardHeader? = null,
     val executiveSummary: List<String> = emptyList(),
@@ -49,8 +50,23 @@ data class DashboardSide(
 data class MastgScore(
     val left: Float? = null,
     val right: Float? = null,
+    val leftCoverage: Float? = null,
+    val rightCoverage: Float? = null,
     val status: String? = null,
     val label: String? = null,
+    val indexId: String? = null,
+)
+
+data class MastgDashboard(
+    val leftScore: Float? = null,
+    val rightScore: Float? = null,
+    val leftCoverage: Float? = null,
+    val rightCoverage: Float? = null,
+    val status: String? = null,
+    val label: String? = null,
+    val indexId: String? = null,
+    val availableIndexes: List<MastgIndexOption> = emptyList(),
+    val tests: List<MastgTestRow> = emptyList(),
 )
 
 data class DashboardVerdictCard(
@@ -117,6 +133,10 @@ data class MastgTestRow(
     val relationType: String,
     val leftStatus: MastgTestStatus,
     val rightStatus: MastgTestStatus,
+    val category: String? = null,
+    val origin: String? = null,
+    val leftSummary: String? = null,
+    val rightSummary: String? = null,
     val evidence: String? = null,
 )
 
@@ -125,7 +145,9 @@ enum class MastgTestStatus {
     FAIL,
     REVIEW,
     NOT_EVALUABLE,
-    ERROR
+    ERROR,
+    NOT_EXECUTED,
+    NOT_APPLICABLE,
 }
 
 

@@ -139,6 +139,7 @@ class ComparisonService:
             report_a=report_a,
             report_b=report_b,
             index_id=request.mastg_index_id or "picheck_mhealth_v1",
+            ensure_all_indexes=True,
             messages=messages,
         )
         _apply_mastg_to_dashboard(dashboard_payload, mastg_payload)
@@ -1292,11 +1293,29 @@ def _evaluate_mastg_for_comparison(
     report_b: VersionReport,
     index_id: str,
     messages: list[str],
+    ensure_all_indexes: bool = False,
 ) -> dict[str, Any]:
     service = MastgEvaluationService(db)
 
     try:
-        left_result = service.evaluate_version(
+        available_indexes = service.available_index_options()
+        indexes_to_ensure = (
+            [item["id"] for item in available_indexes]
+            if ensure_all_indexes
+            else [index_id]
+        )
+        for candidate_index_id in indexes_to_ensure:
+            service.ensure_version_results_for_index(
+                index_id=candidate_index_id,
+                id_app=report_a.version_app.id_app,
+                version=report_a.version_app.version,
+            )
+            service.ensure_version_results_for_index(
+                index_id=candidate_index_id,
+                id_app=report_b.version_app.id_app,
+                version=report_b.version_app.version,
+            )
+        left_result = service.get_version_results_for_index(
             index_id=index_id,
             id_app=report_a.version_app.id_app,
             version=report_a.version_app.version,
@@ -1307,7 +1326,7 @@ def _evaluate_mastg_for_comparison(
             f"con índice {index_id}."
         )
 
-        right_result = service.evaluate_version(
+        right_result = service.get_version_results_for_index(
             index_id=index_id,
             id_app=report_b.version_app.id_app,
             version=report_b.version_app.version,
@@ -1329,6 +1348,7 @@ def _evaluate_mastg_for_comparison(
         "label": left_result.get("index", {}).get("nombre") or index_id,
         "left": left_result,
         "right": right_result,
+        "available_indexes": available_indexes,
         "tests": _merge_mastg_test_results(
             left_result.get("results", []),
             right_result.get("results", []),
@@ -1356,6 +1376,7 @@ def _apply_mastg_to_dashboard(
         "status": "completed",
         "label": label,
         "index_id": index_id,
+        "available_indexes": mastg_payload.get("available_indexes", []),
         "tests": mastg_payload.get("tests", []),
         "left_summary": _mastg_status_summary(mastg_payload.get("left")),
         "right_summary": _mastg_status_summary(mastg_payload.get("right")),
