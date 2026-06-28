@@ -15,6 +15,7 @@ RUN apt-get update \
         ca-certificates \
         libssl3 \
         aapt \
+        file \
         unzip \
     && rm -rf /var/lib/apt/lists/*
 

@@ -257,9 +257,15 @@ class AppRegistrationService:
             )
 
         if extracted_metadata.icon:
-            messages.append(f"[ICON] Icono extraído del APK: {extracted_metadata.icon}.")
+            if extracted_metadata.icon_source == "generated":
+                messages.append(
+                    f"[ICON] No se pudo extraer/renderizar icono original; "
+                    f"se generó fallback PNG: {extracted_metadata.icon}."
+                )
+            else:
+                messages.append(f"[ICON] Icono extraído del APK: {extracted_metadata.icon}.")
         else:
-            messages.append("[ICON] No se encontró icono PNG/WEBP extraíble en el APK.")
+            messages.append("[ICON] No se encontró icono PNG/WEBP/XML extraíble en el APK.")
 
         existing_application = self.application_repository.find_by_id(
             extracted_metadata.id_app
@@ -566,11 +572,22 @@ class AppRegistrationService:
         extracted_icon: str | None,
         existing_icon: str | None,
     ) -> str | None:
-        if explicit_icon:
-            return explicit_icon
-        if existing_icon:
-            return existing_icon
-        return extracted_icon
+        clean_explicit = _clean_icon_value(explicit_icon)
+        if clean_explicit:
+            return clean_explicit
+
+        clean_existing = _clean_icon_value(existing_icon)
+        if _is_external_icon(clean_existing) or _is_public_static_icon(clean_existing):
+            return clean_existing
+
+        clean_extracted = _clean_icon_value(extracted_icon)
+        if clean_extracted:
+            return clean_extracted
+
+        if clean_existing and not _is_invalid_android_icon(clean_existing):
+            return clean_existing
+
+        return None
 
     def _find_selected_existing_version(
         self,
@@ -1032,7 +1049,7 @@ def _is_bad_generated_name(value: str, app_id: str) -> bool:
     if not normalized:
         return True
 
-    if re.match(r"^[0-9a-f]{16,}[_-]", lower):
+    if re.fullmatch(r"[0-9a-f]{16,}", lower) or re.match(r"^[0-9a-f]{16,}[_-]", lower):
         return True
 
     if "@" in normalized and app_lower in lower:
@@ -1044,7 +1061,34 @@ def _is_bad_generated_name(value: str, app_id: str) -> bool:
     if lower.startswith("upload.") or lower.startswith("manual."):
         return True
 
+    if lower.endswith(".apk") or lower.endswith(".xapk") or lower.endswith(".apks") or lower.endswith(".apkm"):
+        return True
+
     return False
+
+
+def _clean_icon_value(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    icon = value.strip()
+    return icon or None
+
+
+def _is_external_icon(value: str | None) -> bool:
+    return bool(value and value.startswith(("http://", "https://")))
+
+
+def _is_public_static_icon(value: str | None) -> bool:
+    return bool(value and value.startswith("/static/"))
+
+
+def _is_invalid_android_icon(value: str | None) -> bool:
+    icon = _clean_icon_value(value)
+    if icon is None:
+        return True
+
+    return icon.startswith("/app/")
 
 
 def _selected_app_key(selected_app: SelectedAppMetadata) -> str:
