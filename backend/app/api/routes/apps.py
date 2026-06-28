@@ -79,6 +79,7 @@ def search_apps(
 
 @router.post("/register-local-apk", response_model=RegisterLocalApkResponse)
 def register_local_apk(
+    request: Request,
     payload: RegisterLocalApkRequest,
     db: Session = Depends(get_db_session),
 ):
