@@ -257,9 +257,15 @@ class AppRegistrationService:
             )
 
         if extracted_metadata.icon:
-            messages.append(f"[ICON] Icono extraído del APK: {extracted_metadata.icon}.")
+            if extracted_metadata.icon_source == "generated":
+                messages.append(
+                    f"[ICON] No se pudo extraer/renderizar icono original; "
+                    f"se generó fallback PNG: {extracted_metadata.icon}."
+                )
+            else:
+                messages.append(f"[ICON] Icono extraído del APK: {extracted_metadata.icon}.")
         else:
-            messages.append("[ICON] No se encontró icono PNG/WEBP extraíble en el APK.")
+            messages.append("[ICON] No se encontró icono PNG/WEBP/XML extraíble en el APK.")
 
         existing_application = self.application_repository.find_by_id(
             extracted_metadata.id_app
@@ -566,11 +572,13 @@ class AppRegistrationService:
         extracted_icon: str | None,
         existing_icon: str | None,
     ) -> str | None:
-        if explicit_icon:
-            return explicit_icon
-        if existing_icon:
-            return existing_icon
-        return extracted_icon
+        if explicit_icon and not _is_invalid_android_icon(explicit_icon):
+            return explicit_icon.strip()
+        if existing_icon and not _is_invalid_android_icon(existing_icon):
+            return existing_icon.strip()
+        if extracted_icon and not _is_invalid_android_icon(extracted_icon):
+            return extracted_icon.strip()
+        return None
 
     def _find_selected_existing_version(
         self,
@@ -1032,7 +1040,7 @@ def _is_bad_generated_name(value: str, app_id: str) -> bool:
     if not normalized:
         return True
 
-    if re.match(r"^[0-9a-f]{16,}[_-]", lower):
+    if re.fullmatch(r"[0-9a-f]{16,}", lower) or re.match(r"^[0-9a-f]{16,}[_-]", lower):
         return True
 
     if "@" in normalized and app_lower in lower:
@@ -1044,7 +1052,37 @@ def _is_bad_generated_name(value: str, app_id: str) -> bool:
     if lower.startswith("upload.") or lower.startswith("manual."):
         return True
 
+    if lower.endswith(".apk") or lower.endswith(".xapk") or lower.endswith(".apks") or lower.endswith(".apkm"):
+        return True
+
     return False
+
+
+def _is_invalid_android_icon(value: str | None) -> bool:
+    if value is None:
+        return True
+
+    icon = value.strip()
+    if not icon:
+        return True
+
+    if icon.startswith("/app/"):
+        return True
+
+    if icon.startswith("/static/"):
+        return not _static_icon_exists(icon)
+
+    return False
+
+
+def _static_icon_exists(icon: str) -> bool:
+    try:
+        public_root = Path(os.getenv("PUBLIC_ARTIFACTS_DIR", "/app/artifacts/public")).resolve()
+        relative_path = icon.removeprefix("/static/")
+        icon_path = (public_root / relative_path).resolve()
+        return icon_path.is_file() and (icon_path == public_root or public_root in icon_path.parents)
+    except OSError:
+        return False
 
 
 def _selected_app_key(selected_app: SelectedAppMetadata) -> str:
