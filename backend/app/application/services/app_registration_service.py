@@ -257,9 +257,15 @@ class AppRegistrationService:
             )
 
         if extracted_metadata.icon:
-            messages.append(f"[ICON] Icono extraído del APK: {extracted_metadata.icon}.")
+            if extracted_metadata.icon_source == "generated":
+                messages.append(
+                    f"[ICON] No se pudo extraer/renderizar icono original; "
+                    f"se generó fallback PNG: {extracted_metadata.icon}."
+                )
+            else:
+                messages.append(f"[ICON] Icono extraído del APK: {extracted_metadata.icon}.")
         else:
-            messages.append("[ICON] No se encontró icono PNG/WEBP extraíble en el APK.")
+            messages.append("[ICON] No se encontró icono PNG/WEBP/XML extraíble en el APK.")
 
         existing_application = self.application_repository.find_by_id(
             extracted_metadata.id_app
@@ -1060,7 +1066,23 @@ def _is_invalid_android_icon(value: str | None) -> bool:
     if not icon:
         return True
 
-    return icon.startswith("/app/")
+    if icon.startswith("/app/"):
+        return True
+
+    if icon.startswith("/static/"):
+        return not _static_icon_exists(icon)
+
+    return False
+
+
+def _static_icon_exists(icon: str) -> bool:
+    try:
+        public_root = Path(os.getenv("PUBLIC_ARTIFACTS_DIR", "/app/artifacts/public")).resolve()
+        relative_path = icon.removeprefix("/static/")
+        icon_path = (public_root / relative_path).resolve()
+        return icon_path.is_file() and (icon_path == public_root or public_root in icon_path.parents)
+    except OSError:
+        return False
 
 
 def _selected_app_key(selected_app: SelectedAppMetadata) -> str:

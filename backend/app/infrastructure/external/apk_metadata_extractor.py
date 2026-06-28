@@ -9,7 +9,7 @@ import subprocess
 import zipfile
 from io import BytesIO
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 from app.domain.value_objects.integration_model import IntegrationModel
 
@@ -28,6 +28,7 @@ class ExtractedApkMetadata:
     apk_sha256: str | None
     app_label: str | None = None
     icon: str | None = None
+    icon_source: str | None = None
 
 
 def extract_apk_metadata(
@@ -77,15 +78,19 @@ def extract_apk_metadata(
 
     app_label = aapt_metadata.get("app_label")
     icon_url = None
+    icon_source = None
 
     if extract_icon and metadata_apk_path is not None:
         try:
-            icon_url = _extract_icon_to_public_storage(
+            icon_result = _extract_icon_to_public_storage(
                 apk_path=metadata_apk_path,
                 preferred_icon_paths=aapt_metadata.get("icon_paths", []),
                 id_app=id_app,
                 version=version,
+                app_label=app_label,
             )
+            if icon_result is not None:
+                icon_url, icon_source = icon_result
         except Exception as exc:
             logger.warning(
                 "[ICON] No se pudo extraer/normalizar icono para %s: %s",
@@ -114,6 +119,7 @@ def extract_apk_metadata(
         apk_sha256=apk_sha256,
         app_label=app_label,
         icon=icon_url,
+        icon_source=icon_source,
     )
 
 
@@ -373,7 +379,7 @@ def _parse_aapt_badging(output: str) -> dict[str, object]:
 
 
 def _extract_application_label(output: str) -> str | None:
-    for prefix in ("application-label-es:", "application-label:", "application-label-en:"):
+    for prefix in ("application-label-es:", "application-label-es-ES:", "application-label:", "application-label-en:"):
         line = next((line for line in output.splitlines() if line.startswith(prefix)), None)
         if line:
             label = _extract_first_quoted_value(line)
@@ -406,14 +412,12 @@ def _extract_application_icon_paths(output: str) -> list[str]:
     for line in output.splitlines():
         density_match = re.match(r"application-icon-(\d+):'([^']+)'", line)
         if density_match:
-            icon_path = density_match.group(2)
-            if _is_raster_icon_path(icon_path):
-                density_candidates.append((int(density_match.group(1)), icon_path))
+            density_candidates.append((int(density_match.group(1)), density_match.group(2)))
             continue
 
         if line.startswith("application:"):
             icon_path = _extract_quoted_value(line, "icon")
-            if icon_path and _is_raster_icon_path(icon_path):
+            if icon_path:
                 fallback_candidates.append(icon_path)
 
     ordered = [path for _, path in sorted(density_candidates, key=lambda item: item[0], reverse=True)]
@@ -433,40 +437,36 @@ def _extract_icon_to_public_storage(
     preferred_icon_paths: list[str],
     id_app: str,
     version: str,
-) -> str | None:
+    app_label: str | None,
+) -> tuple[str, str] | None:
     if not zipfile.is_zipfile(apk_path):
         return None
 
+    public_root = Path("/app/artifacts/public")
+    output_dir = public_root / "icons" / _safe_path_part(id_app) / _safe_path_part(version)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "icon.png"
+
     with zipfile.ZipFile(apk_path, "r") as archive:
-        member = _select_icon_member(archive, preferred_icon_paths)
-        if member is None:
-            logger.info("[ICON] No se encontró icono PNG/WEBP extraíble en %s", apk_path)
-            return None
+        member = _select_icon_member(archive, preferred_icon_paths, apk_path)
+        if member is not None:
+            _write_raster_icon_member(archive, member, output_path)
+            logger.info("[ICON] Icono raster extraído del APK: %s", output_path)
+            return _public_icon_path(id_app, version), "apk_raster"
 
-        suffix = Path(member.filename).suffix.lower()
-        public_root = Path("/app/artifacts/public")
-        output_dir = public_root / "icons" / _safe_path_part(id_app) / _safe_path_part(version)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / "icon.png"
-
-        with archive.open(member, "r") as source:
-            icon_bytes = source.read()
-
-        if suffix == ".png":
-            output_path.write_bytes(icon_bytes)
-        elif suffix == ".webp":
-            with Image.open(BytesIO(icon_bytes)) as image:
-                image.save(output_path, format="PNG")
-        else:
-            return None
-
-    logger.info("[ICON] Icono extraído del APK: %s", output_path)
-    return f"/static/icons/{_safe_path_part(id_app)}/{_safe_path_part(version)}/{output_path.name}"
+    logger.info(
+        "[ICON] No se encontró icono raster/renderizable en %s; se genera fallback PNG.",
+        apk_path,
+    )
+    _write_generated_icon(output_path, app_label or id_app)
+    logger.info("[ICON] Icono generado como fallback: %s", output_path)
+    return _public_icon_path(id_app, version), "generated"
 
 
 def _select_icon_member(
     archive: zipfile.ZipFile,
     preferred_icon_paths: list[str],
+    apk_path: Path,
 ) -> zipfile.ZipInfo | None:
     members_by_name = {member.filename: member for member in archive.infolist() if not member.is_dir()}
 
@@ -474,6 +474,12 @@ def _select_icon_member(
         preferred_member = members_by_name.get(preferred_icon_path)
         if preferred_member and _is_raster_icon_path(preferred_member.filename):
             return preferred_member
+
+    for preferred_icon_path in preferred_icon_paths:
+        if preferred_icon_path.lower().endswith(".xml"):
+            resolved_member = _resolve_xml_icon_member(archive, apk_path, preferred_icon_path)
+            if resolved_member is not None:
+                return resolved_member
 
     candidates = [
         member
@@ -486,6 +492,180 @@ def _select_icon_member(
 
     return sorted(candidates, key=lambda member: (_icon_path_score(member.filename), member.file_size), reverse=True)[0]
 
+
+
+def _write_raster_icon_member(
+    archive: zipfile.ZipFile,
+    member: zipfile.ZipInfo,
+    output_path: Path,
+) -> None:
+    suffix = Path(member.filename).suffix.lower()
+    with archive.open(member, "r") as source:
+        icon_bytes = source.read()
+
+    if suffix == ".png":
+        output_path.write_bytes(icon_bytes)
+        return
+
+    if suffix == ".webp":
+        with Image.open(BytesIO(icon_bytes)) as image:
+            image.save(output_path, format="PNG")
+        return
+
+    raise ValueError(f"Recurso de icono no soportado: {member.filename}")
+
+
+def _resolve_xml_icon_member(
+    archive: zipfile.ZipFile,
+    apk_path: Path,
+    xml_path: str,
+) -> zipfile.ZipInfo | None:
+    xmltree_output = _dump_xmltree(apk_path, xml_path)
+    if not xmltree_output:
+        return None
+
+    members_by_name = {member.filename: member for member in archive.infolist() if not member.is_dir()}
+    for referenced_path in _candidate_resource_paths_from_xmltree(xmltree_output, archive):
+        member = members_by_name.get(referenced_path)
+        if member is not None and _is_raster_icon_path(member.filename):
+            logger.info("[ICON] XML %s resuelto a recurso raster %s", xml_path, member.filename)
+            return member
+
+    logger.info("[ICON] XML %s no apunta a un raster extraíble; se usará fallback generado.", xml_path)
+    return None
+
+
+def _dump_xmltree(apk_path: Path, xml_path: str) -> str | None:
+    for command_name in ("aapt", "aapt2"):
+        try:
+            result = subprocess.run(
+                [command_name, "dump", "xmltree", str(apk_path), xml_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except FileNotFoundError:
+            continue
+        except subprocess.TimeoutExpired:
+            logger.warning("[ICON] %s dump xmltree superó el tiempo máximo para %s", command_name, xml_path)
+            continue
+
+        if result.returncode == 0:
+            return result.stdout
+
+        logger.info("[ICON] %s dump xmltree falló para %s: %s", command_name, xml_path, result.stderr)
+
+    return None
+
+
+def _candidate_resource_paths_from_xmltree(
+    xmltree_output: str,
+    archive: zipfile.ZipFile,
+) -> list[str]:
+    names = {member.filename for member in archive.infolist() if not member.is_dir()}
+    raster_names = sorted(name for name in names if _is_raster_icon_path(name))
+    candidates: list[str] = []
+
+    for match in re.finditer(r'Raw: "@([^"\s]+)"', xmltree_output):
+        ref = match.group(1)
+        candidates.extend(_resource_ref_to_archive_paths(ref, names))
+
+    for match in re.finditer(r'@(?:[^:/]+:)?(?:drawable|mipmap)/([A-Za-z0-9_.-]+)', xmltree_output):
+        resource_name = match.group(1)
+        candidates.extend(_resource_name_to_raster_paths(resource_name, raster_names))
+
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for candidate in candidates:
+        if candidate in names and candidate not in seen:
+            ordered.append(candidate)
+            seen.add(candidate)
+    return ordered
+
+
+def _resource_ref_to_archive_paths(ref: str, archive_names: set[str]) -> list[str]:
+    clean_ref = ref.removeprefix("android:")
+    if clean_ref.startswith(("res/drawable", "res/mipmap")):
+        return [clean_ref] if clean_ref in archive_names else []
+
+    match = re.search(r'(?:drawable|mipmap)/([A-Za-z0-9_.-]+)$', clean_ref)
+    if match:
+        raster_names = [name for name in archive_names if _is_raster_icon_path(name)]
+        return _resource_name_to_raster_paths(match.group(1), raster_names)
+
+    return []
+
+
+def _resource_name_to_raster_paths(resource_name: str, raster_names: list[str]) -> list[str]:
+    return sorted(
+        (
+            name
+            for name in raster_names
+            if Path(name).stem == resource_name
+            and (name.startswith("res/drawable") or name.startswith("res/mipmap"))
+        ),
+        key=lambda name: (_icon_path_score(name), _resource_density_score(name), len(name)),
+        reverse=True,
+    )
+
+
+def _write_generated_icon(output_path: Path, label: str) -> None:
+    initials = _initials_for_label(label)
+    background = _color_for_label(label)
+    image = Image.new("RGBA", (256, 256), background)
+    draw = ImageDraw.Draw(image)
+    font = _load_icon_font(96)
+    bbox = draw.textbbox((0, 0), initials, font=font)
+    x = (256 - (bbox[2] - bbox[0])) / 2 - bbox[0]
+    y = (256 - (bbox[3] - bbox[1])) / 2 - bbox[1]
+    draw.text((x, y), initials, fill=(255, 255, 255, 255), font=font)
+    image.save(output_path, format="PNG")
+
+
+def _initials_for_label(label: str) -> str:
+    words = re.findall(r"[A-Za-zÀ-ÿ0-9]+", label)
+    if not words:
+        return "?"
+    if len(words) == 1:
+        return words[0][:2].upper()
+    return "".join(word[0] for word in words[:2]).upper()
+
+
+def _color_for_label(label: str) -> tuple[int, int, int, int]:
+    digest = hashlib.sha256(label.encode("utf-8")).digest()
+    return (64 + digest[0] % 128, 64 + digest[1] % 128, 64 + digest[2] % 128, 255)
+
+
+def _load_icon_font(size: int) -> ImageFont.ImageFont:
+    for font_path in (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+    ):
+        try:
+            return ImageFont.truetype(font_path, size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _public_icon_path(id_app: str, version: str) -> str:
+    return f"/static/icons/{_safe_path_part(id_app)}/{_safe_path_part(version)}/icon.png"
+
+
+def _resource_density_score(path: str) -> int:
+    lower = path.lower()
+    density_scores = {
+        "xxxhdpi": 600,
+        "xxhdpi": 500,
+        "xhdpi": 400,
+        "hdpi": 300,
+        "mdpi": 200,
+    }
+    for density, score in density_scores.items():
+        if density in lower:
+            return score
+    return 0
 
 def _is_icon_raster_candidate(filename: str) -> bool:
     lower = filename.lower()
