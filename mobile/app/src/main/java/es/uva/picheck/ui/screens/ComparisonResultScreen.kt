@@ -446,18 +446,77 @@ private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftSide: DashboardSi
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         DashboardCard {
             Text("Índice MASTG/PI-check", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold)
-            Text("Selecciona el índice para recalcular solo este bloque con resultados reales persistidos.", color = PiCheckDarkText.copy(alpha = 0.76f), style = MaterialTheme.typography.bodySmall)
-            Box {
-                Text(
-                    text = options.firstOrNull { it.id == selectedIndexId }?.name ?: selectedMastg?.label ?: selectedIndexId,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(PiCheckLegacyBg).clickable { expanded = true }.padding(12.dp),
-                    color = PiCheckDarkText,
-                    fontWeight = FontWeight.Bold,
-                )
+            Text(
+                "Puedes cambiar el índice MASTG/PI-check para ver otro conjunto de pruebas sobre la misma comparativa.",
+                color = PiCheckDarkText.copy(alpha = 0.76f),
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            val selectedOption = options.firstOrNull { it.id == selectedIndexId }
+            val selectedIndexName = selectedOption?.name ?: selectedMastg?.label ?: selectedIndexId
+            val selectedTestCount = selectedOption?.testCount ?: selectedMastg?.tests?.size
+
+            Text(
+                "Índice seleccionado",
+                color = PiCheckDarkText,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = { expanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PiCheckBlue.copy(alpha = 0.10f),
+                        contentColor = PiCheckBlue,
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.Start,
+                    ) {
+                        Text(
+                            selectedIndexName,
+                            color = PiCheckDarkText,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            selectedTestCount?.let { "$it pruebas · toca para cambiar" }
+                                ?: "Toca para cambiar de índice",
+                            color = PiCheckDarkText.copy(alpha = 0.65f),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+
+                    Text(
+                        "Cambiar ▾",
+                        color = PiCheckBlue,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     options.forEach { option ->
                         DropdownMenuItem(
-                            text = { Text("${option.name} (${option.testCount ?: 0} pruebas)") },
+                            text = {
+                                Column {
+                                    Text(
+                                        option.name,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = PiCheckDarkText,
+                                    )
+                                    Text(
+                                        "${option.testCount ?: 0} pruebas",
+                                        color = PiCheckModelNeutral,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            },
                             onClick = {
                                 selectedIndexId = option.id
                                 expanded = false
@@ -515,7 +574,7 @@ private fun MastgGauge(title: String, score: Float?, color: Color, modifier: Mod
                 }
                 Text(score?.let { "${(boundedScore * 100).toInt()}%" } ?: "Pendiente", color = if (score == null) PiCheckLegacyGray else color, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
             }
-            Text(coverage?.let { "Cobertura ${(it * 100).toInt()}%" } ?: "Índice MASTG", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+            Text(coverage?.let { "Pruebas evaluadas ${(it * 100).toInt()}%" } ?: "Índice MASTG", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
         }
     }
 }

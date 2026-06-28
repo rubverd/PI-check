@@ -96,7 +96,7 @@ object PiCheckApiClient {
             .put("right", JSONObject().put("id_app", rightAppId).put("version", rightVersion))
             .put("index_id", indexId)
         val response = post("/api/mastg/evaluate-comparison", body)
-        JSONObject(response).getJSONObject("mastg").toMastgDashboard()
+        response.getJSONObject("mastg").toMastgDashboard()
     }
 
     suspend fun requestComparison(
