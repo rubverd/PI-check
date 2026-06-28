@@ -572,12 +572,21 @@ class AppRegistrationService:
         extracted_icon: str | None,
         existing_icon: str | None,
     ) -> str | None:
-        if explicit_icon and not _is_invalid_android_icon(explicit_icon):
-            return explicit_icon.strip()
-        if existing_icon and not _is_invalid_android_icon(existing_icon):
-            return existing_icon.strip()
-        if extracted_icon and not _is_invalid_android_icon(extracted_icon):
-            return extracted_icon.strip()
+        clean_explicit = _clean_icon_value(explicit_icon)
+        if clean_explicit:
+            return clean_explicit
+
+        clean_existing = _clean_icon_value(existing_icon)
+        if _is_external_icon(clean_existing) or _is_public_static_icon(clean_existing):
+            return clean_existing
+
+        clean_extracted = _clean_icon_value(extracted_icon)
+        if clean_extracted:
+            return clean_extracted
+
+        if clean_existing and not _is_invalid_android_icon(clean_existing):
+            return clean_existing
+
         return None
 
     def _find_selected_existing_version(
@@ -1058,31 +1067,28 @@ def _is_bad_generated_name(value: str, app_id: str) -> bool:
     return False
 
 
-def _is_invalid_android_icon(value: str | None) -> bool:
+def _clean_icon_value(value: str | None) -> str | None:
     if value is None:
-        return True
+        return None
 
     icon = value.strip()
-    if not icon:
+    return icon or None
+
+
+def _is_external_icon(value: str | None) -> bool:
+    return bool(value and value.startswith(("http://", "https://")))
+
+
+def _is_public_static_icon(value: str | None) -> bool:
+    return bool(value and value.startswith("/static/"))
+
+
+def _is_invalid_android_icon(value: str | None) -> bool:
+    icon = _clean_icon_value(value)
+    if icon is None:
         return True
 
-    if icon.startswith("/app/"):
-        return True
-
-    if icon.startswith("/static/"):
-        return not _static_icon_exists(icon)
-
-    return False
-
-
-def _static_icon_exists(icon: str) -> bool:
-    try:
-        public_root = Path(os.getenv("PUBLIC_ARTIFACTS_DIR", "/app/artifacts/public")).resolve()
-        relative_path = icon.removeprefix("/static/")
-        icon_path = (public_root / relative_path).resolve()
-        return icon_path.is_file() and (icon_path == public_root or public_root in icon_path.parents)
-    except OSError:
-        return False
+    return icon.startswith("/app/")
 
 
 def _selected_app_key(selected_app: SelectedAppMetadata) -> str:
