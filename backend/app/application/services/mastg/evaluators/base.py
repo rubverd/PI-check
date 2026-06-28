@@ -97,43 +97,76 @@ def extract_http_urls(value: Any) -> list[str]:
     return sorted(urls)
 
 
-def is_public_http_url(url: str) -> bool:
-    parsed = urlparse(url)
+def is_public_http_url(url: object) -> bool:
+    """
+    Devuelve True solo para URLs HTTP públicas.
+
+    La entrada puede venir de evidencias MobSF extraídas por regex, por lo que puede
+    contener cadenas malformadas. En esos casos no debe romper la comparativa:
+    simplemente se considera una URL no pública/ignorable.
+    """
+    if not isinstance(url, str):
+        return False
+
+    candidate = url.strip()
+
+    if not candidate:
+        return False
+
+    # Evita falsos positivos típicos al extraer URLs desde texto/JSON.
+    candidate = candidate.strip(" \t\r\n'\"`),;<>")
+
+    if not candidate.lower().startswith("http://"):
+        return False
+
+    try:
+        parsed = urlparse(candidate)
+    except ValueError:
+        return False
 
     if parsed.scheme.lower() != "http":
         return False
 
-    host = parsed.hostname
+    try:
+        host = parsed.hostname
+    except ValueError:
+        return False
+
     if not host:
         return False
 
-    host_lower = host.lower()
+    host = host.strip().lower()
 
-    ignored_hosts = {
-        "localhost",
-        "schemas.android.com",
-        "www.w3.org",
-        "apache.org",
-        "xmlpull.org",
-    }
-
-    if host_lower in ignored_hosts:
+    if host in {"localhost", "127.0.0.1", "0.0.0.0"}:
         return False
 
-    if host_lower.endswith(".android.com"):
+    if host.endswith(".local"):
         return False
 
     try:
-        ip = ipaddress.ip_address(host_lower)
-        return not (
+        ip = ipaddress.ip_address(host.strip("[]"))
+
+        if (
             ip.is_private
             or ip.is_loopback
             or ip.is_link_local
             or ip.is_multicast
+            or ip.is_unspecified
             or ip.is_reserved
-        )
-    except ValueError:
+        ):
+            return False
+
         return True
+
+    except ValueError:
+        # No es IP: tratamos como dominio.
+        pass
+
+    # Ignorar dominios sin punto, normalmente nombres internos.
+    if "." not in host:
+        return False
+
+    return True
 
 
 def limit_evidence(items: list[dict[str, Any]], limit: int = 30) -> list[dict[str, Any]]:
