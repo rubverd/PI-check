@@ -279,3 +279,26 @@ FROM pg_stat_activity
 WHERE datname = current_database()
 ORDER BY xact_start NULLS LAST;
 ```
+
+### Consola administrativa
+
+Ejecución desde Docker:
+
+```bash
+docker compose exec backend python -m app.cli.admin_console
+```
+
+Comandos principales:
+
+```text
+apps list
+apps show <id_app>
+apk inspect <ruta_apk>
+apk register <ruta_apk> [--run-mobsf]
+mobsf health
+mobsf analyze <id_app> <version>
+mastg tests
+mastg indexes
+mastg index create
+mastg evaluate <id_app> <version> <id_indice>
+```

@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -43,12 +44,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +71,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import es.uva.picheck.data.local.getInstalledDeviceApps
+import es.uva.picheck.data.local.history.ComparisonHistoryRepository
+import es.uva.picheck.data.local.history.PiCheckDatabase
 import es.uva.picheck.data.model.AnalyzedApp
 import es.uva.picheck.data.model.DeviceAppInfo
 import es.uva.picheck.data.model.IntegrationModel
@@ -105,7 +110,8 @@ private enum class AppListMode {
 private enum class MainScreenState {
     SELECTION,
     PROGRESS,
-    RESULT
+    RESULT,
+    HISTORY
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -119,6 +125,9 @@ fun AppSearchScreen() {
     var selectedApps by remember { mutableStateOf<List<PlayStoreApp>>(emptyList()) }
 
     var comparisonResult by remember { mutableStateOf<PiCheckComparisonAnalysis?>(null) }
+    var showHistory by remember { mutableStateOf(false) }
+    var openedFromHistory by remember { mutableStateOf(false) }
+    var historyError by remember { mutableStateOf<String?>(null) }
 
     var isLoadingSearch by remember { mutableStateOf(false) }
     var isLoadingAnalyzed by remember { mutableStateOf(false) }
@@ -141,6 +150,12 @@ fun AppSearchScreen() {
 
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val historyRepository = remember(context) {
+        ComparisonHistoryRepository(
+            PiCheckDatabase.getInstance(context).comparisonHistoryDao(),
+        )
+    }
+    val historyItems by historyRepository.observeHistory().collectAsState(initial = emptyList())
     val uploadLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -158,6 +173,17 @@ fun AppSearchScreen() {
             AppListMode.REGISTERED -> "Mostrando aplicaciones registradas en el servidor."
             AppListMode.SEARCH -> "Busca aplicaciones para añadirlas a la comparación."
             AppListMode.UPLOAD -> "Importa APKs al servidor; después aparecerán en Registradas."
+        }
+    }
+
+    fun saveComparisonToHistory(result: PiCheckComparisonAnalysis) {
+        coroutineScope.launch {
+            try {
+                historyRepository.save(result)
+                statusMessage = "Comparativa generada y guardada en historial."
+            } catch (exception: Exception) {
+                statusMessage = "Comparativa generada, pero no se pudo guardar en historial."
+            }
         }
     }
 
@@ -251,6 +277,7 @@ fun AppSearchScreen() {
 
     val mainScreenState = when {
         comparisonResult != null -> MainScreenState.RESULT
+        showHistory -> MainScreenState.HISTORY
         showDownloadProgress && selectedApps.size == 2 -> MainScreenState.PROGRESS
         else -> MainScreenState.SELECTION
     }
@@ -273,8 +300,15 @@ fun AppSearchScreen() {
                             currentMode = AppListMode.REGISTERED
                             isLoadingSearch = false
                             showDownloadProgress = false
-                            statusMessage = "Selecciona dos aplicaciones para preparar su comparación."
+                            if (openedFromHistory) {
+                                showHistory = true
+                                statusMessage = "Comparativa histórica cargada desde Room."
+                            } else {
+                                statusMessage = "Selecciona dos aplicaciones para preparar su comparación."
+                            }
+                            openedFromHistory = false
                         },
+                        allowRemoteMastgIndexChange = !openedFromHistory,
                     )
                 }
             }
@@ -285,6 +319,8 @@ fun AppSearchScreen() {
                         appA = selectedApps[0],
                         appB = selectedApps[1],
                         onFinished = { result ->
+                            openedFromHistory = false
+                            saveComparisonToHistory(result)
                             comparisonResult = result
                             showDownloadProgress = false
                         },
@@ -296,12 +332,55 @@ fun AppSearchScreen() {
                 }
             }
 
+            MainScreenState.HISTORY -> {
+                ComparisonHistoryScreen(
+                    items = historyItems,
+                    isLoading = false,
+                    error = historyError,
+                    onBack = {
+                        showHistory = false
+                        historyError = null
+                    },
+                    onOpen = { id ->
+                        coroutineScope.launch {
+                            try {
+                                val restored = historyRepository.getResult(id)
+                                if (restored != null) {
+                                    comparisonResult = restored
+                                    openedFromHistory = true
+                                    showHistory = false
+                                    historyError = null
+                                } else {
+                                    historyError = "No se pudo reconstruir la comparativa guardada."
+                                }
+                            } catch (exception: Exception) {
+                                historyError = "Error abriendo historial: ${exception.message}"
+                            }
+                        }
+                    },
+                    onDelete = { id ->
+                        coroutineScope.launch {
+                            try {
+                                historyRepository.delete(id)
+                                historyError = null
+                            } catch (exception: Exception) {
+                                historyError = "No se pudo borrar la comparativa: ${exception.message}"
+                            }
+                        }
+                    },
+                )
+            }
+
             MainScreenState.SELECTION -> {
                 Scaffold(
                     topBar = {
                         PiCheckHeader(
                             currentMode = currentMode,
                             onModeSelected = ::selectMode,
+                            onHistoryClick = {
+                                historyError = null
+                                showHistory = true
+                            },
                         )
                     },
                     containerColor = PiCheckBackground,
@@ -580,6 +659,7 @@ fun AppSearchScreen() {
 private fun PiCheckHeader(
     currentMode: AppListMode,
     onModeSelected: (AppListMode) -> Unit,
+    onHistoryClick: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -594,6 +674,15 @@ private fun PiCheckHeader(
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                 )
+            },
+            actions = {
+                IconButton(onClick = onHistoryClick) {
+                    Icon(
+                        imageVector = Icons.Filled.History,
+                        contentDescription = "Historial de comparativas",
+                        tint = Color.White,
+                    )
+                }
             },
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = PiCheckBurgundy,
