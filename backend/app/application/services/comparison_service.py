@@ -9,7 +9,13 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
-from app.application.services.mastg.mastg_evaluation_service import MastgEvaluationService
+from app.application.services.mastg.evaluators.base import (
+    extract_http_urls,
+    is_public_http_url,
+)
+from app.application.services.mastg.mastg_evaluation_service import (
+    MastgEvaluationService,
+)
 from app.application.services.app_analysis_service import AppAnalysisService
 from app.application.services.app_registration_service import (
     AppRegistrationService,
@@ -36,6 +42,10 @@ class ComparisonExecutionResult:
     technical_summary: dict[str, Any]
     comparison_json: str
     comparison_artifact_path: str | None
+
+
+class ComparisonMastgError(RuntimeError):
+    """Error controlado al aplicar evaluadores PI-check inspirados en MASTG."""
 
 
 class ComparisonService:
@@ -123,16 +133,21 @@ class ComparisonService:
             comparison_payload=comparison_payload,
         )
         technical_summary = _build_technical_summary(report_a, report_b)
-        
+
         mastg_payload = _evaluate_mastg_for_comparison(
             db=self.db,
             report_a=report_a,
             report_b=report_b,
-            index_id="picheck_mhealth_v1",
+            index_id=request.mastg_index_id or "picheck_mhealth_v1",
+            ensure_all_indexes=True,
             messages=messages,
         )
         _apply_mastg_to_dashboard(dashboard_payload, mastg_payload)
         comparison.id_indice_aplicado = mastg_payload.get("index_id")
+        comparison_payload["id_indice_aplicado"] = comparison.id_indice_aplicado
+        messages.append(
+            f"[MASTG] Índice aplicado a la comparativa: {comparison.id_indice_aplicado}."
+        )
 
         artifact_path = _save_temporary_comparison_payload(
             comparison_payload,
@@ -208,10 +223,13 @@ def _build_comparison_payload(
         "summary": {
             "left_model": report_a.version_app.modelo_integracion.value,
             "right_model": report_b.version_app.modelo_integracion.value,
-            "same_application": report_a.version_app.id_app == report_b.version_app.id_app,
-            "comparison_type": "version_vs_version"
-            if report_a.version_app.id_app == report_b.version_app.id_app
-            else "app_vs_app",
+            "same_application": report_a.version_app.id_app
+            == report_b.version_app.id_app,
+            "comparison_type": (
+                "version_vs_version"
+                if report_a.version_app.id_app == report_b.version_app.id_app
+                else "app_vs_app"
+            ),
         },
         "mobsf": {
             "left": _mobsf_summary(report_a),
@@ -251,7 +269,9 @@ def _mobsf_summary(report: VersionReport) -> dict[str, Any]:
         "report_path": mobsf_report.ruta_informe if mobsf_report else None,
         "file_name": mobsf_report.file_name if mobsf_report else None,
         "scan_type": mobsf_report.scan_type if mobsf_report else None,
-        "report_keys": sorted(json_report.keys()) if isinstance(json_report, dict) else [],
+        "report_keys": (
+            sorted(json_report.keys()) if isinstance(json_report, dict) else []
+        ),
     }
 
 
@@ -260,7 +280,11 @@ def _mobsf_highlights(report_data: dict[str, Any] | None) -> dict[str, Any]:
         return {}
 
     urls = _collection_items(report_data.get("urls")) if "urls" in report_data else []
-    domains = _collection_items(report_data.get("domains")) if "domains" in report_data else []
+    domains = (
+        _collection_items(report_data.get("domains"))
+        if "domains" in report_data
+        else []
+    )
     trackers = _collection_items(report_data.get("trackers")) or _collection_items(
         report_data.get("trackers_info")
     )
@@ -380,6 +404,7 @@ def _build_dashboard_payload(
         privacy_metrics=privacy_metrics,
         security_metrics=security_metrics,
         exposure_metrics=exposure_metrics,
+        mastg=mastg,
     )
     key_findings = [_key_finding(finding) for finding in technical_findings[:20]]
     permission_diff = _permission_diff(left_report, right_report)
@@ -465,13 +490,19 @@ def _dashboard_header_side(
     }
 
 
-def _extract_dashboard_metrics(report_data: dict[str, Any] | None) -> dict[str, float | None]:
+def _extract_dashboard_metrics(
+    report_data: dict[str, Any] | None,
+) -> dict[str, float | None]:
     if not isinstance(report_data, dict):
         return {}
 
     permissions = report_data.get("permissions")
     urls = _collection_items(report_data.get("urls")) if "urls" in report_data else None
-    domains = _collection_items(report_data.get("domains")) if "domains" in report_data else None
+    domains = (
+        _collection_items(report_data.get("domains"))
+        if "domains" in report_data
+        else None
+    )
     trackers = None
     if "trackers" in report_data or "trackers_info" in report_data:
         trackers = _collection_items(report_data.get("trackers")) or _collection_items(
@@ -489,7 +520,11 @@ def _extract_dashboard_metrics(report_data: dict[str, Any] | None) -> dict[str, 
         ]
     )
 
-    http_urls = [value for value in (urls or []) if str(value).lower().startswith("http://")]
+    # Reutiliza la misma lógica que los evaluadores PI-check inspirados en MASTG
+    # para evitar discrepancias entre el contador visual y MASTG-TEST-0233.
+    http_urls = [
+        url for url in extract_http_urls(report_data) if is_public_http_url(url)
+    ]
 
     return {
         "target_sdk": _first_number(
@@ -497,31 +532,53 @@ def _extract_dashboard_metrics(report_data: dict[str, Any] | None) -> dict[str, 
             ["target_sdk", "target_sdk_version", "target_sdk_version_code"],
         ),
         "min_sdk": _first_number(report_data, ["min_sdk", "min_sdk_version"]),
-        "dangerous_permissions": float(_count_dangerous_permissions(permissions))
-        if permissions is not None
-        else None,
-        "health_connect_permissions": float(_count_health_connect_permissions(permissions))
-        if permissions is not None
-        else None,
-        "location_permissions": float(_count_permissions_matching(permissions, ["location"]))
-        if permissions is not None
-        else None,
-        "sensor_permissions": float(_count_permissions_matching(permissions, ["sensor", "body", "activity_recognition"]))
-        if permissions is not None
-        else None,
-        "storage_permissions": float(_count_permissions_matching(permissions, ["storage", "media", "external"]))
-        if permissions is not None
-        else None,
+        "dangerous_permissions": (
+            float(_count_dangerous_permissions(permissions))
+            if permissions is not None
+            else None
+        ),
+        "health_connect_permissions": (
+            float(_count_health_connect_permissions(permissions))
+            if permissions is not None
+            else None
+        ),
+        "location_permissions": (
+            float(_count_permissions_matching(permissions, ["location"]))
+            if permissions is not None
+            else None
+        ),
+        "sensor_permissions": (
+            float(
+                _count_permissions_matching(
+                    permissions, ["sensor", "body", "activity_recognition"]
+                )
+            )
+            if permissions is not None
+            else None
+        ),
+        "storage_permissions": (
+            float(
+                _count_permissions_matching(
+                    permissions, ["storage", "media", "external"]
+                )
+            )
+            if permissions is not None
+            else None
+        ),
         "trackers": float(len(trackers)) if trackers is not None else None,
         "domains": float(len(domains)) if domains is not None else None,
         "urls": float(len(urls)) if urls is not None else None,
-        "http_urls": float(len(http_urls)) if urls is not None else None,
-        "high_findings": float(_count_findings_by_severity(findings, "high"))
-        if has_security_sections
-        else None,
-        "warning_findings": float(_count_findings_by_severity(findings, "warning"))
-        if has_security_sections
-        else None,
+        "http_urls": float(len(http_urls)),
+        "high_findings": (
+            float(_count_findings_by_severity(findings, "high"))
+            if has_security_sections
+            else None
+        ),
+        "warning_findings": (
+            float(_count_findings_by_severity(findings, "warning"))
+            if has_security_sections
+            else None
+        ),
         "trackers_examples": _string_examples(trackers or []),
         "domains_examples": _string_examples(domains or []),
         "urls_examples": _string_examples(urls or []),
@@ -537,7 +594,6 @@ def _extract_dashboard_metrics(report_data: dict[str, Any] | None) -> dict[str, 
     }
 
 
-
 def _verdict_cards(
     left_metrics: dict[str, float | None],
     right_metrics: dict[str, float | None],
@@ -545,6 +601,7 @@ def _verdict_cards(
     privacy_metrics: list[dict[str, Any]],
     security_metrics: list[dict[str, Any]],
     exposure_metrics: list[dict[str, Any]],
+    mastg: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     cards = [
         _verdict_card(
@@ -578,19 +635,50 @@ def _verdict_cards(
                 right_metrics.get("http_urls"),
                 preferred="lower",
             ),
-            "status": "warning"
-            if left_metrics.get("http_urls") or right_metrics.get("http_urls")
-            else "neutral",
+            "status": (
+                "warning"
+                if left_metrics.get("http_urls") or right_metrics.get("http_urls")
+                else "neutral"
+            ),
             "summary": "Revisa URLs HTTP y posibles comunicaciones sin cifrado.",
         },
-        {
+        _mastg_verdict_card(mastg),
+    ]
+    return cards
+
+
+def _mastg_verdict_card(mastg: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(mastg, dict) or mastg.get("status") != "completed":
+        return {
             "title": "MASTG",
             "winner": "pending",
             "status": "neutral",
-            "summary": "El índice MASTG final está pendiente y no se infiere desde MobSF.",
-        },
-    ]
-    return cards
+            "summary": "El índice MASTG/PI-check está pendiente y no se infiere desde MobSF.",
+        }
+
+    left_score = _number_or_none(mastg.get("left_score"))
+    right_score = _number_or_none(mastg.get("right_score"))
+    winner = _winner_for_values(left_score, right_score, preferred="higher")
+    label = mastg.get("label") or mastg.get("index_id") or "Índice PI-check"
+    left_pct = _percent_label(left_score)
+    right_pct = _percent_label(right_score)
+    left_cov = _percent_label(_number_or_none(mastg.get("left_coverage")))
+    right_cov = _percent_label(_number_or_none(mastg.get("right_coverage")))
+    return {
+        "title": "MASTG",
+        "winner": winner,
+        "status": "positive" if winner in {"left", "right"} else "neutral",
+        "summary": (
+            f"{label}: izquierda {left_pct} (cobertura {left_cov}) vs "
+            f"derecha {right_pct} (cobertura {right_cov})."
+        ),
+    }
+
+
+def _percent_label(value: float | None) -> str:
+    if value is None:
+        return "N/D"
+    return f"{value * 100:.1f}%"
 
 
 def _verdict_card(
@@ -646,7 +734,9 @@ def _winner_for_values(
     left_number = _number_or_none(left_value)
     right_number = _number_or_none(right_value)
     if left_number is None or right_number is None or left_number == right_number:
-        return "tie" if left_number is not None and right_number is not None else "review"
+        return (
+            "tie" if left_number is not None and right_number is not None else "review"
+        )
     if preferred == "higher":
         return "left" if left_number > right_number else "right"
     if preferred == "lower":
@@ -706,8 +796,15 @@ def _quick_kpi(
 
     winner = "review"
     level = "warning"
-    if not force_review and left_value is not None and right_value is not None and left_value != right_value:
-        left_wins = left_value > right_value if higher_is_better else left_value < right_value
+    if (
+        not force_review
+        and left_value is not None
+        and right_value is not None
+        and left_value != right_value
+    ):
+        left_wins = (
+            left_value > right_value if higher_is_better else left_value < right_value
+        )
         winner = "left" if left_wins else "right"
         level = "positive"
 
@@ -720,7 +817,6 @@ def _quick_kpi(
         "winner": winner,
         "level": level,
     }
-
 
 
 def _preferred_for_metric(key: str) -> str:
@@ -804,19 +900,25 @@ def _executive_summary(
             "Las versiones comparadas usan modelos de integración distintos, por lo que conviene revisar los cambios funcionales y de privacidad."
         )
 
-    if _number_or_none(left_metrics.get("target_sdk")) and _number_or_none(right_metrics.get("target_sdk")):
+    if _number_or_none(left_metrics.get("target_sdk")) and _number_or_none(
+        right_metrics.get("target_sdk")
+    ):
         if float(left_metrics["target_sdk"]) != float(right_metrics["target_sdk"]):
             sentences.append(
                 "La comparativa detecta diferencias en la plataforma Android objetivo declarada por cada versión."
             )
 
-    if _number_or_none(left_metrics.get("trackers")) and _number_or_none(right_metrics.get("trackers")):
+    if _number_or_none(left_metrics.get("trackers")) and _number_or_none(
+        right_metrics.get("trackers")
+    ):
         if float(left_metrics["trackers"]) != float(right_metrics["trackers"]):
             sentences.append(
                 "Los informes MobSF muestran diferencias en la exposición a trackers entre ambas versiones."
             )
 
-    if _number_or_none(left_metrics.get("high_findings")) or _number_or_none(right_metrics.get("high_findings")):
+    if _number_or_none(left_metrics.get("high_findings")) or _number_or_none(
+        right_metrics.get("high_findings")
+    ):
         sentences.append(
             "MobSF ha identificado hallazgos técnicos de seguridad que requieren revisión antes de sacar conclusiones finales."
         )
@@ -891,24 +993,31 @@ def _count_health_connect_permissions(value: Any) -> int:
         return 0
 
     return sum(
-        1
-        for permission in permission_names
-        if "health" in str(permission).lower()
+        1 for permission in permission_names if "health" in str(permission).lower()
     )
-
 
 
 def _permission_diff(
     left_report: dict[str, Any] | None,
     right_report: dict[str, Any] | None,
 ) -> dict[str, list[str]]:
-    left_permissions = set(_permission_names(left_report.get("permissions") if isinstance(left_report, dict) else None))
-    right_permissions = set(_permission_names(right_report.get("permissions") if isinstance(right_report, dict) else None))
+    left_permissions = set(
+        _permission_names(
+            left_report.get("permissions") if isinstance(left_report, dict) else None
+        )
+    )
+    right_permissions = set(
+        _permission_names(
+            right_report.get("permissions") if isinstance(right_report, dict) else None
+        )
+    )
     return {
         "added_in_left": sorted(left_permissions - right_permissions)[:50],
         "removed_in_left": sorted(right_permissions - left_permissions)[:50],
         "health_connect_permissions": sorted(
-            permission for permission in left_permissions if "health" in str(permission).lower()
+            permission
+            for permission in left_permissions
+            if "health" in str(permission).lower()
         )[:50],
     }
 
@@ -994,7 +1103,9 @@ def _technical_findings(
                     "affected_side": affected_side,
                     "description": _finding_description(details),
                     "detail": _finding_detail(details),
-                    "masvs": _finding_optional(details, ["masvs", "owasp-mobile", "masvs_control"]),
+                    "masvs": _finding_optional(
+                        details, ["masvs", "owasp-mobile", "masvs_control"]
+                    ),
                     "cwe": _finding_optional(details, ["cwe", "cwe_id"]),
                 }
             )
@@ -1006,14 +1117,19 @@ def _iter_finding_items(section: Any) -> list[tuple[str, Any]]:
         items: list[tuple[str, Any]] = []
         for key, value in section.items():
             if isinstance(value, dict) and any(
-                field in value for field in ["severity", "cvss", "metadata", "description"]
+                field in value
+                for field in ["severity", "cvss", "metadata", "description"]
             ):
                 items.append((str(key), value))
             elif isinstance(value, dict):
                 items.extend(_iter_finding_items(value))
         return items
     if isinstance(section, list):
-        return [(str(item.get("title", item.get("name", "Hallazgo"))), item) for item in section if isinstance(item, dict)]
+        return [
+            (str(item.get("title", item.get("name", "Hallazgo"))), item)
+            for item in section
+            if isinstance(item, dict)
+        ]
     return []
 
 
@@ -1066,7 +1182,11 @@ def _clean_finding_title(value: str) -> str:
 
 
 def _count_findings_by_severity(findings: list[dict[str, Any]], severity: str) -> int:
-    return sum(1 for finding in findings if finding.get("severity", "").lower() == severity.lower())
+    return sum(
+        1
+        for finding in findings
+        if finding.get("severity", "").lower() == severity.lower()
+    )
 
 
 def _build_technical_summary(
@@ -1129,12 +1249,15 @@ def _permission_names(value: Any) -> list[Any]:
         return value
     return []
 
+
 def _save_temporary_comparison_payload(
     payload: dict[str, Any],
     dashboard_payload: dict[str, Any],
     technical_summary: dict[str, Any],
 ) -> str:
-    output_dir = Path(os.getenv("COMPARISON_ARTIFACTS_DIR", "/app/artifacts/comparisons"))
+    output_dir = Path(
+        os.getenv("COMPARISON_ARTIFACTS_DIR", "/app/artifacts/comparisons")
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     created_at = datetime.fromisoformat(payload["created_at"])
@@ -1163,42 +1286,69 @@ def _safe_filename_part(value: str | None) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", (value or "unknown").strip())
     return cleaned[:80] or "unknown"
 
+
 def _evaluate_mastg_for_comparison(
     db: Session,
     report_a: VersionReport,
     report_b: VersionReport,
     index_id: str,
     messages: list[str],
+    ensure_all_indexes: bool = False,
 ) -> dict[str, Any]:
     service = MastgEvaluationService(db)
 
-    left_result = service.evaluate_version(
-        index_id=index_id,
-        id_app=report_a.version_app.id_app,
-        version=report_a.version_app.version,
-    )
-    messages.append(
-        "[MASTG] Evaluación completada para "
-        f"{report_a.version_app.id_app}:{report_a.version_app.version} "
-        f"con índice {index_id}."
-    )
+    try:
+        available_indexes = service.available_index_options()
+        indexes_to_ensure = (
+            [item["id"] for item in available_indexes]
+            if ensure_all_indexes
+            else [index_id]
+        )
+        for candidate_index_id in indexes_to_ensure:
+            service.ensure_version_results_for_index(
+                index_id=candidate_index_id,
+                id_app=report_a.version_app.id_app,
+                version=report_a.version_app.version,
+            )
+            service.ensure_version_results_for_index(
+                index_id=candidate_index_id,
+                id_app=report_b.version_app.id_app,
+                version=report_b.version_app.version,
+            )
+        left_result = service.get_version_results_for_index(
+            index_id=index_id,
+            id_app=report_a.version_app.id_app,
+            version=report_a.version_app.version,
+        )
+        messages.append(
+            "[MASTG] Evaluación completada para "
+            f"{report_a.version_app.id_app}:{report_a.version_app.version} "
+            f"con índice {index_id}."
+        )
 
-    right_result = service.evaluate_version(
-        index_id=index_id,
-        id_app=report_b.version_app.id_app,
-        version=report_b.version_app.version,
-    )
-    messages.append(
-        "[MASTG] Evaluación completada para "
-        f"{report_b.version_app.id_app}:{report_b.version_app.version} "
-        f"con índice {index_id}."
-    )
+        right_result = service.get_version_results_for_index(
+            index_id=index_id,
+            id_app=report_b.version_app.id_app,
+            version=report_b.version_app.version,
+        )
+        messages.append(
+            "[MASTG] Evaluación completada para "
+            f"{report_b.version_app.id_app}:{report_b.version_app.version} "
+            f"con índice {index_id}."
+        )
+    except ValueError as exc:
+        raise ComparisonMastgError(str(exc)) from exc
+    except Exception as exc:
+        raise ComparisonMastgError(
+            f"No se pudo completar la evaluación MASTG/PI-check para la comparativa: {exc}"
+        ) from exc
 
     return {
         "index_id": index_id,
         "label": left_result.get("index", {}).get("nombre") or index_id,
         "left": left_result,
         "right": right_result,
+        "available_indexes": available_indexes,
         "tests": _merge_mastg_test_results(
             left_result.get("results", []),
             right_result.get("results", []),
@@ -1226,6 +1376,7 @@ def _apply_mastg_to_dashboard(
         "status": "completed",
         "label": label,
         "index_id": index_id,
+        "available_indexes": mastg_payload.get("available_indexes", []),
         "tests": mastg_payload.get("tests", []),
         "left_summary": _mastg_status_summary(mastg_payload.get("left")),
         "right_summary": _mastg_status_summary(mastg_payload.get("right")),
@@ -1241,6 +1392,25 @@ def _apply_mastg_to_dashboard(
         "label": label,
         "index_id": index_id,
     }
+    dashboard_payload["verdict_cards"] = _replace_mastg_card(
+        dashboard_payload.get("verdict_cards", []),
+        dashboard_payload["mastg"],
+    )
+    dashboard_payload["quick_kpis"] = _replace_mastg_card(
+        dashboard_payload.get("quick_kpis", []),
+        dashboard_payload["mastg"],
+    )
+
+
+def _replace_mastg_card(cards: Any, mastg: dict[str, Any]) -> list[dict[str, Any]]:
+    current = list(cards) if isinstance(cards, list) else []
+    replacement = _mastg_verdict_card(mastg)
+    for idx, card in enumerate(current):
+        if isinstance(card, dict) and card.get("title") == "MASTG":
+            current[idx] = replacement
+            return current
+    current.append(replacement)
+    return current
 
 
 def _mastg_score_value(result: Any) -> float | None:
@@ -1319,7 +1489,9 @@ def _merge_mastg_test_results(
 
         by_id[id_mastg].update(
             {
-                "left_status": _normalize_mastg_status_for_android(item.get("resultado")),
+                "left_status": _normalize_mastg_status_for_android(
+                    item.get("resultado")
+                ),
                 "left_summary": item.get("summary"),
                 "left_recommendation": item.get("recommendation"),
                 "left_result_json": item.get("ruta_resultado_json"),
@@ -1352,26 +1524,30 @@ def _merge_mastg_test_results(
 
         by_id[id_mastg].update(
             {
-                "right_status": _normalize_mastg_status_for_android(item.get("resultado")),
+                "right_status": _normalize_mastg_status_for_android(
+                    item.get("resultado")
+                ),
                 "right_summary": item.get("summary"),
                 "right_recommendation": item.get("recommendation"),
                 "right_result_json": item.get("ruta_resultado_json"),
             }
         )
 
-    return [
-        by_id[id_mastg]
-        for id_mastg in sorted(by_id)
-    ]
+    return [by_id[id_mastg] for id_mastg in sorted(by_id)]
 
 
 def _normalize_mastg_status_for_android(value: Any) -> str:
     normalized = str(value or "NOT_EVALUABLE").upper()
 
-    if normalized in {"PASS", "FAIL", "REVIEW", "ERROR", "NOT_EVALUABLE"}:
+    if normalized in {
+        "PASS",
+        "FAIL",
+        "REVIEW",
+        "ERROR",
+        "NOT_EVALUABLE",
+        "NOT_APPLICABLE",
+        "NOT_EXECUTED",
+    }:
         return normalized
-
-    if normalized in {"NOT_EXECUTED", "NOT_APPLICABLE"}:
-        return "NOT_EVALUABLE"
 
     return "NOT_EVALUABLE"

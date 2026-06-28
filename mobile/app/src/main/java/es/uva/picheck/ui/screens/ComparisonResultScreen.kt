@@ -25,6 +25,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -32,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,9 +58,12 @@ import es.uva.picheck.data.model.ComparisonDashboard
 import es.uva.picheck.data.model.DashboardMetric
 import es.uva.picheck.data.model.DashboardSide
 import es.uva.picheck.data.model.DashboardVerdictCard
+import es.uva.picheck.data.model.MastgDashboard
+import es.uva.picheck.data.model.MastgIndexOption
 import es.uva.picheck.data.model.MastgTestRow
 import es.uva.picheck.data.model.MastgTestStatus
 import es.uva.picheck.data.model.PiCheckComparisonAnalysis
+import es.uva.picheck.data.remote.PiCheckApiClient
 import es.uva.picheck.ui.theme.PiCheckBackground
 import es.uva.picheck.ui.theme.PiCheckBlue
 import es.uva.picheck.ui.theme.PiCheckBurgundy
@@ -226,7 +232,6 @@ private fun CompactSideSummary(side: DashboardSide, colors: ComparisonSideColors
         )
         Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
             ModelChip(modelDisplay(side.integrationModel), colors.modelColor, compact = true)
-            Text("MobSF ${compactMobsfStatus(side.mobsfStatus)}", color = PiCheckModelNeutral, style = MaterialTheme.typography.labelSmall, maxLines = 1)
         }
     }
 }
@@ -316,7 +321,6 @@ private fun ComparedAppCard(side: DashboardSide, sideLabel: String, colors: Comp
             Text(appName, modifier = Modifier.fillMaxWidth(), color = colors.accent, fontWeight = FontWeight.ExtraBold, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
             Text("Versión ${side.version ?: "N/D"}", modifier = Modifier.fillMaxWidth(), color = PiCheckDarkText, fontWeight = FontWeight.SemiBold, maxLines = 1, textAlign = TextAlign.Center)
             ModelChip(model, colors.modelColor)
-            Text("MobSF: ${side.mobsfStatus ?: "N/D"}", modifier = Modifier.fillMaxWidth(), color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall, maxLines = 1, textAlign = TextAlign.Center)
         }
     }
 }
@@ -394,21 +398,91 @@ private fun BarRow(title: String, valueLabel: String, value: Float?, maxValue: F
 private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftSide: DashboardSide, rightSide: DashboardSide, leftColors: ComparisonSideColors, rightColors: ComparisonSideColors) {
     val leftName = sideDisplayName(leftSide)
     val rightName = sideDisplayName(rightSide)
+    val initialMastg = dashboard?.mastg
+    val options = initialMastg?.availableIndexes.orEmpty().ifEmpty {
+        listOf(MastgIndexOption(PiCheckApiClient.DEFAULT_MASTG_INDEX_ID, "Índice PI-check mHealth v1"))
+    }
+    var selectedIndexId by remember(initialMastg?.indexId) { mutableStateOf(initialMastg?.indexId ?: PiCheckApiClient.DEFAULT_MASTG_INDEX_ID) }
+    var expanded by remember { mutableStateOf(false) }
+    var selectedMastg by remember(initialMastg) { mutableStateOf(initialMastg) }
+    var loadingIndex by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(selectedIndexId, leftSide.appId, leftSide.version, rightSide.appId, rightSide.version) {
+        if (selectedIndexId == initialMastg?.indexId) {
+            selectedMastg = initialMastg
+            return@LaunchedEffect
+        }
+        val leftAppId = leftSide.appId
+        val leftVersion = leftSide.version
+        val rightAppId = rightSide.appId
+        val rightVersion = rightSide.version
+        if (leftAppId.isNullOrBlank() || leftVersion.isNullOrBlank() || rightAppId.isNullOrBlank() || rightVersion.isNullOrBlank()) {
+            loadError = "No hay identificadores suficientes para cambiar de índice."
+            return@LaunchedEffect
+        }
+        loadingIndex = true
+        loadError = null
+        try {
+            selectedMastg = PiCheckApiClient.evaluateMastgComparison(
+                leftAppId = leftAppId,
+                leftVersion = leftVersion,
+                rightAppId = rightAppId,
+                rightVersion = rightVersion,
+                indexId = selectedIndexId,
+            )
+        } catch (exception: Exception) {
+            loadError = exception.message ?: "No se pudo cargar el índice seleccionado."
+        } finally {
+            loadingIndex = false
+        }
+    }
+
+    val scoreFallback = dashboard?.mastgScore
+    val leftScore = selectedMastg?.leftScore ?: scoreFallback?.left
+    val rightScore = selectedMastg?.rightScore ?: scoreFallback?.right
+    val rows = selectedMastg?.tests?.takeIf { it.isNotEmpty() } ?: buildMastgRows(dashboard)
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        DashboardCard {
+            Text("Índice MASTG/PI-check", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold)
+            Text("Selecciona el índice para recalcular solo este bloque con resultados reales persistidos.", color = PiCheckDarkText.copy(alpha = 0.76f), style = MaterialTheme.typography.bodySmall)
+            Box {
+                Text(
+                    text = options.firstOrNull { it.id == selectedIndexId }?.name ?: selectedMastg?.label ?: selectedIndexId,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(PiCheckLegacyBg).clickable { expanded = true }.padding(12.dp),
+                    color = PiCheckDarkText,
+                    fontWeight = FontWeight.Bold,
+                )
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    options.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text("${option.name} (${option.testCount ?: 0} pruebas)") },
+                            onClick = {
+                                selectedIndexId = option.id
+                                expanded = false
+                            },
+                        )
+                    }
+                }
+            }
+            if (loadingIndex) Text("Cargando índice seleccionado...", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall)
+            loadError?.let { Text(it, color = PiCheckRiskHigh, style = MaterialTheme.typography.bodySmall) }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            MastgGauge(leftName, dashboard?.mastgScore?.left, leftColors.accent, Modifier.weight(1f))
-            MastgGauge(rightName, dashboard?.mastgScore?.right, rightColors.accent, Modifier.weight(1f))
+            MastgGauge(leftName, leftScore, leftColors.accent, Modifier.weight(1f), selectedMastg?.leftCoverage)
+            MastgGauge(rightName, rightScore, rightColors.accent, Modifier.weight(1f), selectedMastg?.rightCoverage)
         }
         DashboardCard {
-            Text("Evaluación preliminar basada en evidencias MobSF", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold)
-            Text(dashboard?.mastgScore?.label ?: "Evaluación MASTG pendiente", color = PiCheckDarkText.copy(alpha = 0.76f), style = MaterialTheme.typography.bodySmall)
+            Text("Evaluación automatizada PI-check inspirada en MASTG", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold)
+            Text(selectedMastg?.label ?: scoreFallback?.label ?: "Evaluación MASTG pendiente", color = PiCheckDarkText.copy(alpha = 0.76f), style = MaterialTheme.typography.bodySmall)
         }
-        MastgEvidenceTable(buildMastgRows(dashboard), leftName, rightName, leftColors.accent, rightColors.accent)
+        MastgEvidenceTable(rows, leftName, rightName, leftColors.accent, rightColors.accent)
     }
 }
 
 @Composable
-private fun MastgGauge(title: String, score: Float?, color: Color, modifier: Modifier = Modifier) {
+private fun MastgGauge(title: String, score: Float?, color: Color, modifier: Modifier = Modifier, coverage: Float? = null) {
     val boundedScore = score?.coerceIn(0f, 1f) ?: 0f
     val animatedScore by animateFloatAsState(targetValue = boundedScore, label = "mastg-gauge")
     DashboardCard(modifier) {
@@ -441,7 +515,7 @@ private fun MastgGauge(title: String, score: Float?, color: Color, modifier: Mod
                 }
                 Text(score?.let { "${(boundedScore * 100).toInt()}%" } ?: "Pendiente", color = if (score == null) PiCheckLegacyGray else color, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
             }
-            Text("Índice MASTG", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+            Text(coverage?.let { "Cobertura ${(it * 100).toInt()}%" } ?: "Índice MASTG", color = PiCheckModelNeutral, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
         }
     }
 }
@@ -449,7 +523,7 @@ private fun MastgGauge(title: String, score: Float?, color: Color, modifier: Mod
 @Composable
 private fun MastgEvidenceTable(rows: List<MastgTestRow>, leftName: String, rightName: String, leftColor: Color, rightColor: Color) {
     DashboardCard {
-        Text("Evidencias MobSF asociadas a MASTG", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
+        Text("Resultados del índice MASTG/PI-check", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.titleMedium)
         MastgLegend()
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Prueba MASTG", Modifier.weight(1.8f), fontWeight = FontWeight.Bold, color = PiCheckDarkText)
@@ -458,7 +532,11 @@ private fun MastgEvidenceTable(rows: List<MastgTestRow>, leftName: String, right
         }
         rows.forEach { row ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(Modifier.weight(1.8f)) { Text(row.title, color = PiCheckDarkText, fontWeight = FontWeight.SemiBold); Text(row.id, color = PiCheckModelNeutral, style = MaterialTheme.typography.labelSmall) }
+                Column(Modifier.weight(1.8f)) {
+                    Text(row.title, color = PiCheckDarkText, fontWeight = FontWeight.SemiBold)
+                    Text(listOfNotNull(row.id, row.category, row.relationType, row.origin).filter { it.isNotBlank() }.joinToString(" · "), color = PiCheckModelNeutral, style = MaterialTheme.typography.labelSmall)
+                    row.leftSummary?.takeIf { it.isNotBlank() }?.let { Text(it, color = PiCheckModelNeutral, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { MastgStatusDot(row.leftStatus) }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { MastgStatusDot(row.rightStatus) }
             }
@@ -469,7 +547,7 @@ private fun MastgEvidenceTable(rows: List<MastgTestRow>, leftName: String, right
 @Composable
 private fun MastgStatusDot(status: MastgTestStatus) {
     when (status) {
-        MastgTestStatus.NOT_EVALUABLE -> Text("—", color = PiCheckLegacyGray, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+        MastgTestStatus.NOT_EVALUABLE, MastgTestStatus.NOT_EXECUTED, MastgTestStatus.NOT_APPLICABLE -> Text("—", color = PiCheckLegacyGray, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
         MastgTestStatus.ERROR -> Text("✕", color = PiCheckRiskHigh, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
         else -> Box(Modifier.size(14.dp).clip(CircleShape).background(statusColor(status)))
     }
@@ -560,5 +638,4 @@ private fun modelDisplay(value: String?): String = if (isHealthConnectModel(valu
 private fun modelShort(value: String): String = when { value.contains("health", true) -> "HC"; value.contains("legacy", true) -> "Legacy"; else -> value.take(8) }
 private fun isHealthConnectModel(value: String?): Boolean = value.equals("HEALTH_CONNECT", true) || value.equals("health_connect", true) || value.equals("Health Connect", true)
 private fun isLegacyModel(value: String?): Boolean = value.equals("LEGACY", true) || value.equals("legacy", true) || value.equals("Legacy", true)
-private fun compactMobsfStatus(value: String?): String = when (value?.lowercase()) { "success", "ok", "completed" -> "OK"; "error", "failed" -> "ERROR"; "pending", "queued", "running" -> "PENDING"; else -> value ?: "N/D" }
-private fun statusColor(status: MastgTestStatus): Color = when (status) { MastgTestStatus.PASS -> PiCheckSuccess; MastgTestStatus.FAIL -> PiCheckRiskHigh; MastgTestStatus.REVIEW -> PiCheckWarning; MastgTestStatus.NOT_EVALUABLE -> PiCheckLegacyGray; MastgTestStatus.ERROR -> PiCheckRiskHigh }
+private fun statusColor(status: MastgTestStatus): Color = when (status) { MastgTestStatus.PASS -> PiCheckSuccess; MastgTestStatus.FAIL -> PiCheckRiskHigh; MastgTestStatus.REVIEW -> PiCheckWarning; MastgTestStatus.NOT_EVALUABLE, MastgTestStatus.NOT_EXECUTED, MastgTestStatus.NOT_APPLICABLE -> PiCheckLegacyGray; MastgTestStatus.ERROR -> PiCheckRiskHigh }

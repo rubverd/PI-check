@@ -6,8 +6,10 @@ from app.application.services.mastg.evaluators.base import (
     scan_apk_dex_patterns,
     summarize_findings,
 )
-from app.application.services.mastg.models import MastgEvaluationContext, MastgRuleResult
-
+from app.application.services.mastg.models import (
+    MastgEvaluationContext,
+    MastgRuleResult,
+)
 
 INSECURE_TLS_PATTERNS = {
     "trust_manager": [
@@ -37,10 +39,13 @@ INSECURE_TLS_PATTERNS = {
 }
 
 
-HIGH_CONFIDENCE_CATEGORIES = {
-    "hostname_verifier",
-    "ssl_error_bypass",
-    "insecure_ssl_context",
+OBSOLETE_TLS_PROTOCOL_PATTERNS = {
+    "obsolete_tls_protocol": [
+        "SSLv3",
+        "TLSv1",
+        "TLSv1.0",
+        "TLSv1.1",
+    ],
 }
 
 
@@ -52,6 +57,10 @@ def evaluate(context: MastgEvaluationContext) -> MastgRuleResult:
 
     try:
         findings = scan_apk_dex_patterns(context.apk_path, INSECURE_TLS_PATTERNS)
+        obsolete_protocol_findings = scan_apk_dex_patterns(
+            context.apk_path,
+            OBSOLETE_TLS_PROTOCOL_PATTERNS,
+        )
     except zipfile.BadZipFile as exc:
         return MastgRuleResult.error_result(
             "El APK no es un ZIP válido y no se puede analizar.",
@@ -61,36 +70,32 @@ def evaluate(context: MastgEvaluationContext) -> MastgRuleResult:
     details = summarize_findings(findings)
     details["apk_path"] = str(context.apk_path)
 
+    details["obsolete_protocol_findings"] = summarize_findings(
+        obsolete_protocol_findings
+    )
+
     evidence = [
         {
             "category": category,
             "matches": matches[:20],
         }
-        for category, matches in findings.items()
+        for category, matches in {**obsolete_protocol_findings, **findings}.items()
     ]
 
-    high_confidence = sorted(
-        category
-        for category in findings
-        if category in HIGH_CONFIDENCE_CATEGORIES
-    )
-
-    details["high_confidence_categories"] = high_confidence
-
-    if high_confidence:
+    if obsolete_protocol_findings:
         return MastgRuleResult.fail(
-            "Se han detectado patrones de alto riesgo compatibles con validación TLS insegura.",
+            "Se han detectado referencias explícitas a protocolos TLS/SSL obsoletos.",
             details=details,
             evidence=evidence,
             recommendation=(
-                "Revisar implementaciones personalizadas de TrustManager, HostnameVerifier "
-                "y manejadores de errores SSL. No se deben aceptar certificados o hosts sin validación estricta."
+                "Eliminar cualquier configuración que permita SSLv3, TLSv1.0 o TLSv1.1 "
+                "y restringir las comunicaciones a versiones TLS modernas."
             ),
         )
 
     if findings:
         return MastgRuleResult.review(
-            "Se han detectado clases relacionadas con TLS personalizado, pero la evidencia no es concluyente.",
+            "Se han detectado patrones genéricos de TLS personalizado; requieren revisión manual y no prueban por sí solos protocolos obsoletos.",
             details=details,
             evidence=evidence,
             recommendation=(
