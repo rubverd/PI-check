@@ -34,7 +34,7 @@ def evaluate(context: MastgEvaluationContext) -> MastgRuleResult:
     explicit_evidence: list[dict[str, object]] = []
 
     for key, value in walk_items(mobsf_json):
-        normalized_key = key.replace("-", "_").replace(" ", "_").lower()
+        normalized_key = str(key).replace("-", "_").replace(" ", "_").lower()
 
         if normalized_key in CLEAR_TEXT_KEYS and value is True:
             explicit_evidence.append(

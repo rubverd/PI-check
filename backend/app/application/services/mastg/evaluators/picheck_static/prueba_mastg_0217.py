@@ -11,7 +11,8 @@ from app.application.services.mastg.models import (
     MastgRuleResult,
 )
 
-INSECURE_TLS_PATTERNS = {
+
+TLS_REVIEW_PATTERNS = {
     "trust_manager": [
         "javax/net/ssl/X509TrustManager",
         "checkServerTrusted",
@@ -20,16 +21,14 @@ INSECURE_TLS_PATTERNS = {
     ],
     "hostname_verifier": [
         "javax/net/ssl/HostnameVerifier",
-        "verify",
         "ALLOW_ALL_HOSTNAME_VERIFIER",
         "AllowAllHostnameVerifier",
     ],
     "ssl_error_bypass": [
         "android/webkit/SslErrorHandler",
         "onReceivedSslError",
-        "proceed",
     ],
-    "insecure_ssl_context": [
+    "custom_ssl_context": [
         "javax/net/ssl/SSLContext",
         "TrustAll",
         "trustAll",
@@ -42,7 +41,6 @@ INSECURE_TLS_PATTERNS = {
 OBSOLETE_TLS_PROTOCOL_PATTERNS = {
     "obsolete_tls_protocol": [
         "SSLv3",
-        "TLSv1",
         "TLSv1.0",
         "TLSv1.1",
     ],
@@ -56,7 +54,7 @@ def evaluate(context: MastgEvaluationContext) -> MastgRuleResult:
         )
 
     try:
-        findings = scan_apk_dex_patterns(context.apk_path, INSECURE_TLS_PATTERNS)
+        tls_review_findings = scan_apk_dex_patterns(context.apk_path, TLS_REVIEW_PATTERNS)
         obsolete_protocol_findings = scan_apk_dex_patterns(
             context.apk_path,
             OBSOLETE_TLS_PROTOCOL_PATTERNS,
@@ -67,19 +65,18 @@ def evaluate(context: MastgEvaluationContext) -> MastgRuleResult:
             error=str(exc),
         )
 
-    details = summarize_findings(findings)
-    details["apk_path"] = str(context.apk_path)
-
-    details["obsolete_protocol_findings"] = summarize_findings(
-        obsolete_protocol_findings
-    )
+    details = {
+        "apk_path": str(context.apk_path),
+        "obsolete_protocol_findings": summarize_findings(obsolete_protocol_findings),
+        "tls_review_findings": summarize_findings(tls_review_findings),
+    }
 
     evidence = [
         {
             "category": category,
             "matches": matches[:20],
         }
-        for category, matches in {**obsolete_protocol_findings, **findings}.items()
+        for category, matches in {**obsolete_protocol_findings, **tls_review_findings}.items()
     ]
 
     if obsolete_protocol_findings:
@@ -93,13 +90,14 @@ def evaluate(context: MastgEvaluationContext) -> MastgRuleResult:
             ),
         )
 
-    if findings:
+    if tls_review_findings:
         return MastgRuleResult.review(
             "Se han detectado patrones genéricos de TLS personalizado; requieren revisión manual y no prueban por sí solos protocolos obsoletos.",
             details=details,
             evidence=evidence,
             recommendation=(
-                "Revisar manualmente el uso de X509TrustManager, SSLContext y lógica de validación TLS."
+                "Revisar manualmente el uso de X509TrustManager, HostnameVerifier, SSLContext "
+                "y lógica de validación TLS."
             ),
         )
 
