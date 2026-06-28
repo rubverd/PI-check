@@ -122,7 +122,12 @@ object PiCheckApiClient {
 
         val response = post("/api/comparisons/request", body)
         response.logComparisonResponseDiagnostics()
-        response.toPiCheckComparisonAnalysis()
+        parseComparisonAnalysis(response.toString())
+    }
+
+
+    fun parseComparisonAnalysis(rawJson: String): PiCheckComparisonAnalysis {
+        return JSONObject(rawJson).toPiCheckComparisonAnalysis()
     }
 
     suspend fun getRegisteredApps(): List<AnalyzedApp> = withContext(Dispatchers.IO) {
