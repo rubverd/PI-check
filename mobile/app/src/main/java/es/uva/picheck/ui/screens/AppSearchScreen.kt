@@ -114,6 +114,20 @@ private enum class MainScreenState {
     HISTORY
 }
 
+private enum class ApkUploadStatusKind {
+    INFO,
+    LOADING,
+    SUCCESS,
+    ERROR
+}
+
+private data class UploadStatusStyle(
+    val backgroundColor: Color,
+    val borderColor: Color,
+    val title: String,
+    val textColor: Color,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppSearchScreen() {
@@ -139,6 +153,7 @@ fun AppSearchScreen() {
     var deviceAppsStatus by remember { mutableStateOf("Cargando aplicaciones instaladas...") }
     var isUploadingApk by remember { mutableStateOf(false) }
     var uploadStatus by remember { mutableStateOf("Esperando selección de APK/XAPK/APKS/APKM.") }
+    var uploadStatusKind by remember { mutableStateOf(ApkUploadStatusKind.INFO) }
 
     var statusMessage by remember {
         mutableStateOf("Selecciona dos aplicaciones para preparar su comparación.")
@@ -164,6 +179,7 @@ fun AppSearchScreen() {
             selectedUploadUri = uri
             selectedUploadName = displayName
             uploadStatus = "Archivo seleccionado: $displayName"
+            uploadStatusKind = ApkUploadStatusKind.INFO
         }
     }
 
@@ -545,6 +561,7 @@ fun AppSearchScreen() {
                                             UploadApkCard(
                                                 selectedFileName = selectedUploadName,
                                                 status = uploadStatus,
+                                                statusKind = uploadStatusKind,
                                                 isUploading = isUploadingApk,
                                                 onPickFile = {
                                                     uploadLauncher.launch(
@@ -561,13 +578,15 @@ fun AppSearchScreen() {
                                                     val fileName = selectedUploadName
 
                                                     if (uri == null || fileName == null) {
-                                                        uploadStatus = "Selecciona primero un archivo APK."
+                                                        uploadStatus = "No has seleccionado ningún APK. Pulsa Seleccionar y elige un archivo antes de subirlo."
+                                                        uploadStatusKind = ApkUploadStatusKind.ERROR
                                                         return@UploadApkCard
                                                     }
 
                                                     coroutineScope.launch {
                                                         isUploadingApk = true
-                                                        uploadStatus = "Subiendo APK... Registrando versión..."
+                                                        uploadStatus = "Registrando APK…\nSe está enviando el archivo al backend y procesando sus metadatos."
+                                                        uploadStatusKind = ApkUploadStatusKind.LOADING
 
                                                         try {
                                                             val result = PiCheckApiClient.uploadApk(
@@ -575,17 +594,15 @@ fun AppSearchScreen() {
                                                                 uri = uri,
                                                                 fileName = fileName,
                                                             )
-                                                            uploadStatus = if (result.contains("ya estaba registrada")) {
-                                                                "La versión ya estaba registrada: $result"
-                                                            } else {
-                                                                "APK registrado correctamente: $result"
-                                                            }
+                                                            uploadStatus = result.successMessage()
+                                                            uploadStatusKind = ApkUploadStatusKind.SUCCESS
                                                             selectedUploadUri = null
                                                             selectedUploadName = null
                                                             refreshRegisteredApps(showLoadingIndicator = true)
                                                             currentMode = AppListMode.REGISTERED
                                                         } catch (exception: Exception) {
-                                                            uploadStatus = "Error al subir APK: ${exception.message}"
+                                                            uploadStatus = "No se ha podido registrar el APK. ${exception.message ?: "Inténtalo de nuevo."}"
+                                                            uploadStatusKind = ApkUploadStatusKind.ERROR
                                                         } finally {
                                                             isUploadingApk = false
                                                         }
@@ -618,7 +635,8 @@ fun AppSearchScreen() {
                                                     onUpload = {
                                                         coroutineScope.launch {
                                                             isUploadingApk = true
-                                                            uploadStatus = "Subiendo APK base de ${deviceApp.name}..."
+                                                            uploadStatus = "Registrando APK…\nSe está enviando ${deviceApp.name} al backend y procesando sus metadatos."
+                                                            uploadStatusKind = ApkUploadStatusKind.LOADING
 
                                                             try {
                                                                 val result = PiCheckApiClient.uploadApkFile(
@@ -626,15 +644,13 @@ fun AppSearchScreen() {
                                                                     fileName = "${deviceApp.packageName}.apk",
                                                                     title = deviceApp.name,
                                                                 )
-                                                                uploadStatus = if (result.contains("ya estaba registrada")) {
-                                                                    "La versión ya estaba registrada: $result"
-                                                                } else {
-                                                                    "APK registrado correctamente: $result"
-                                                                }
+                                                                uploadStatus = result.successMessage()
+                                                                uploadStatusKind = ApkUploadStatusKind.SUCCESS
                                                                 refreshRegisteredApps(showLoadingIndicator = true)
                                                                 currentMode = AppListMode.REGISTERED
                                                             } catch (exception: Exception) {
-                                                                uploadStatus = "Error al subir ${deviceApp.name}: ${exception.message}"
+                                                                uploadStatus = "No se ha podido registrar el APK de ${deviceApp.name}. ${exception.message ?: "Inténtalo de nuevo."}"
+                                                                uploadStatusKind = ApkUploadStatusKind.ERROR
                                                             } finally {
                                                                 isUploadingApk = false
                                                             }
@@ -807,6 +823,7 @@ private fun HeaderSectionTab(
 private fun UploadApkCard(
     selectedFileName: String?,
     status: String,
+    statusKind: ApkUploadStatusKind,
     isUploading: Boolean,
     onPickFile: () -> Unit,
     onUpload: () -> Unit,
@@ -835,12 +852,10 @@ private fun UploadApkCard(
                 overflow = TextOverflow.Ellipsis,
             )
 
-            Text(
-                text = status,
-                color = PiCheckDarkText,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            UploadStatusPanel(
+                status = status,
+                statusKind = statusKind,
+                isUploading = isUploading,
             )
 
             Row(
@@ -861,7 +876,7 @@ private fun UploadApkCard(
 
                 Button(
                     onClick = onUpload,
-                    enabled = selectedFileName != null && !isUploading,
+                    enabled = !isUploading,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = PiCheckBlue,
                         contentColor = Color.White,
@@ -878,6 +893,74 @@ private fun UploadApkCard(
                         Text("Subir")
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UploadStatusPanel(
+    status: String,
+    statusKind: ApkUploadStatusKind,
+    isUploading: Boolean,
+) {
+    val style = when (statusKind) {
+        ApkUploadStatusKind.LOADING -> UploadStatusStyle(
+            backgroundColor = PiCheckBlue.copy(alpha = 0.08f),
+            borderColor = PiCheckBlue.copy(alpha = 0.35f),
+            title = "Registrando APK",
+            textColor = PiCheckDarkText,
+        )
+        ApkUploadStatusKind.SUCCESS -> UploadStatusStyle(
+            backgroundColor = PiCheckHCGreen.copy(alpha = 0.12f),
+            borderColor = PiCheckHCGreen.copy(alpha = 0.45f),
+            title = "Aplicación registrada correctamente",
+            textColor = PiCheckDarkText,
+        )
+        ApkUploadStatusKind.ERROR -> UploadStatusStyle(
+            backgroundColor = PiCheckBurgundy.copy(alpha = 0.10f),
+            borderColor = PiCheckBurgundy.copy(alpha = 0.45f),
+            title = "Error al registrar el APK",
+            textColor = PiCheckBurgundy,
+        )
+        ApkUploadStatusKind.INFO -> UploadStatusStyle(
+            backgroundColor = Color(0xFFF8F8FB),
+            borderColor = PiCheckCardBorder,
+            title = "Estado de subida",
+            textColor = PiCheckDarkText,
+        )
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, style.borderColor),
+        colors = CardDefaults.cardColors(containerColor = style.backgroundColor),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (isUploading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = PiCheckBlue,
+                    strokeWidth = 2.dp,
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = style.title,
+                    color = style.textColor,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = status,
+                    color = style.textColor.copy(alpha = 0.82f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }

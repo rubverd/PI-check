@@ -41,6 +41,23 @@ import java.net.URLEncoder
 import java.net.URL
 
 object PiCheckApiClient {
+    data class ApkUploadResult(
+        val appId: String,
+        val appName: String,
+        val version: String,
+        val alreadyRegistered: Boolean,
+        val message: String?,
+    ) {
+        fun successMessage(): String {
+            val visibleName = appName.ifBlank { appId }
+            return if (version.isNotBlank()) {
+                "La aplicación $visibleName, versión $version, se ha registrado correctamente."
+            } else {
+                "La aplicación $visibleName se ha registrado correctamente."
+            }
+        }
+    }
+
     private object ApiEnvironment {
         // Cambia solo esta constante para alternar entre entornos.
         // Opciones útiles:
@@ -150,7 +167,7 @@ object PiCheckApiClient {
         category: String? = null,
         sourceLabel: String = "mobile_upload",
         runMobsf: Boolean = false,
-    ): String = uploadApkMultipart(
+    ): ApkUploadResult = uploadApkMultipart(
         fileName = fileName,
         title = title,
         developer = developer,
@@ -169,7 +186,7 @@ object PiCheckApiClient {
         category: String? = null,
         sourceLabel: String = "mobile_installed_app",
         runMobsf: Boolean = false,
-    ): String = uploadApkMultipart(
+    ): ApkUploadResult = uploadApkMultipart(
         fileName = fileName,
         title = title,
         developer = developer,
@@ -189,7 +206,7 @@ object PiCheckApiClient {
         runMobsf: Boolean,
         openInputStream: () -> InputStream?,
         missingFileMessage: String,
-    ): String = withContext(Dispatchers.IO) {
+    ): ApkUploadResult = withContext(Dispatchers.IO) {
         val boundary = "----PiCheckBoundary${System.currentTimeMillis()}"
         val connection = (URL("$BASE_URL/api/apps/upload-apk").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
@@ -214,10 +231,20 @@ object PiCheckApiClient {
         val json = JSONObject(connection.readResponse())
         val app = json.getJSONObject("app")
         val version = json.getJSONObject("version")
-        val alreadyRegistered = json.optBoolean("already_registered", false)
-        val status = if (alreadyRegistered) "ya estaba registrada" else "registrada"
+        val appId = app.optString("app_id", app.optString("id_app", json.optString("id_app")))
+        val appName = app.optString(
+            "name",
+            app.optString("nombre", json.optString("app_name", json.optString("package_name", appId))),
+        )
+        val versionName = version.optString("version", json.optString("version_name"))
 
-        "${app.getString("name")} ${version.getString("version")} $status"
+        ApkUploadResult(
+            appId = appId,
+            appName = appName,
+            version = versionName,
+            alreadyRegistered = json.optBoolean("already_registered", false),
+            message = json.optNullableString("message"),
+        )
     }
 
 
