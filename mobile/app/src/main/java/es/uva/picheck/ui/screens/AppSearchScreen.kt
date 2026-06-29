@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -43,12 +44,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +71,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import es.uva.picheck.data.local.getInstalledDeviceApps
+import es.uva.picheck.data.local.history.ComparisonHistoryRepository
+import es.uva.picheck.data.local.history.PiCheckDatabase
 import es.uva.picheck.data.model.AnalyzedApp
 import es.uva.picheck.data.model.DeviceAppInfo
 import es.uva.picheck.data.model.IntegrationModel
@@ -105,8 +110,23 @@ private enum class AppListMode {
 private enum class MainScreenState {
     SELECTION,
     PROGRESS,
-    RESULT
+    RESULT,
+    HISTORY
 }
+
+private enum class ApkUploadStatusKind {
+    INFO,
+    LOADING,
+    SUCCESS,
+    ERROR
+}
+
+private data class UploadStatusStyle(
+    val backgroundColor: Color,
+    val borderColor: Color,
+    val title: String,
+    val textColor: Color,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -119,6 +139,9 @@ fun AppSearchScreen() {
     var selectedApps by remember { mutableStateOf<List<PlayStoreApp>>(emptyList()) }
 
     var comparisonResult by remember { mutableStateOf<PiCheckComparisonAnalysis?>(null) }
+    var showHistory by remember { mutableStateOf(false) }
+    var openedFromHistory by remember { mutableStateOf(false) }
+    var historyError by remember { mutableStateOf<String?>(null) }
 
     var isLoadingSearch by remember { mutableStateOf(false) }
     var isLoadingAnalyzed by remember { mutableStateOf(false) }
@@ -130,6 +153,7 @@ fun AppSearchScreen() {
     var deviceAppsStatus by remember { mutableStateOf("Cargando aplicaciones instaladas...") }
     var isUploadingApk by remember { mutableStateOf(false) }
     var uploadStatus by remember { mutableStateOf("Esperando selección de APK/XAPK/APKS/APKM.") }
+    var uploadStatusKind by remember { mutableStateOf(ApkUploadStatusKind.INFO) }
 
     var statusMessage by remember {
         mutableStateOf("Selecciona dos aplicaciones para preparar su comparación.")
@@ -141,6 +165,12 @@ fun AppSearchScreen() {
 
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val historyRepository = remember(context) {
+        ComparisonHistoryRepository(
+            PiCheckDatabase.getInstance(context).comparisonHistoryDao(),
+        )
+    }
+    val historyItems by historyRepository.observeHistory().collectAsState(initial = emptyList())
     val uploadLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -149,6 +179,7 @@ fun AppSearchScreen() {
             selectedUploadUri = uri
             selectedUploadName = displayName
             uploadStatus = "Archivo seleccionado: $displayName"
+            uploadStatusKind = ApkUploadStatusKind.INFO
         }
     }
 
@@ -158,6 +189,17 @@ fun AppSearchScreen() {
             AppListMode.REGISTERED -> "Mostrando aplicaciones registradas en el servidor."
             AppListMode.SEARCH -> "Busca aplicaciones para añadirlas a la comparación."
             AppListMode.UPLOAD -> "Importa APKs al servidor; después aparecerán en Registradas."
+        }
+    }
+
+    fun saveComparisonToHistory(result: PiCheckComparisonAnalysis) {
+        coroutineScope.launch {
+            try {
+                historyRepository.save(result)
+                statusMessage = "Comparativa generada y guardada en historial."
+            } catch (exception: Exception) {
+                statusMessage = "Comparativa generada, pero no se pudo guardar en historial."
+            }
         }
     }
 
@@ -251,6 +293,7 @@ fun AppSearchScreen() {
 
     val mainScreenState = when {
         comparisonResult != null -> MainScreenState.RESULT
+        showHistory -> MainScreenState.HISTORY
         showDownloadProgress && selectedApps.size == 2 -> MainScreenState.PROGRESS
         else -> MainScreenState.SELECTION
     }
@@ -273,8 +316,15 @@ fun AppSearchScreen() {
                             currentMode = AppListMode.REGISTERED
                             isLoadingSearch = false
                             showDownloadProgress = false
-                            statusMessage = "Selecciona dos aplicaciones para preparar su comparación."
+                            if (openedFromHistory) {
+                                showHistory = true
+                                statusMessage = "Comparativa histórica cargada desde Room."
+                            } else {
+                                statusMessage = "Selecciona dos aplicaciones para preparar su comparación."
+                            }
+                            openedFromHistory = false
                         },
+                        allowRemoteMastgIndexChange = !openedFromHistory,
                     )
                 }
             }
@@ -285,6 +335,8 @@ fun AppSearchScreen() {
                         appA = selectedApps[0],
                         appB = selectedApps[1],
                         onFinished = { result ->
+                            openedFromHistory = false
+                            saveComparisonToHistory(result)
                             comparisonResult = result
                             showDownloadProgress = false
                         },
@@ -296,12 +348,55 @@ fun AppSearchScreen() {
                 }
             }
 
+            MainScreenState.HISTORY -> {
+                ComparisonHistoryScreen(
+                    items = historyItems,
+                    isLoading = false,
+                    error = historyError,
+                    onBack = {
+                        showHistory = false
+                        historyError = null
+                    },
+                    onOpen = { id ->
+                        coroutineScope.launch {
+                            try {
+                                val restored = historyRepository.getResult(id)
+                                if (restored != null) {
+                                    comparisonResult = restored
+                                    openedFromHistory = true
+                                    showHistory = false
+                                    historyError = null
+                                } else {
+                                    historyError = "No se pudo reconstruir la comparativa guardada."
+                                }
+                            } catch (exception: Exception) {
+                                historyError = "Error abriendo historial: ${exception.message}"
+                            }
+                        }
+                    },
+                    onDelete = { id ->
+                        coroutineScope.launch {
+                            try {
+                                historyRepository.delete(id)
+                                historyError = null
+                            } catch (exception: Exception) {
+                                historyError = "No se pudo borrar la comparativa: ${exception.message}"
+                            }
+                        }
+                    },
+                )
+            }
+
             MainScreenState.SELECTION -> {
                 Scaffold(
                     topBar = {
                         PiCheckHeader(
                             currentMode = currentMode,
                             onModeSelected = ::selectMode,
+                            onHistoryClick = {
+                                historyError = null
+                                showHistory = true
+                            },
                         )
                     },
                     containerColor = PiCheckBackground,
@@ -466,6 +561,7 @@ fun AppSearchScreen() {
                                             UploadApkCard(
                                                 selectedFileName = selectedUploadName,
                                                 status = uploadStatus,
+                                                statusKind = uploadStatusKind,
                                                 isUploading = isUploadingApk,
                                                 onPickFile = {
                                                     uploadLauncher.launch(
@@ -482,13 +578,15 @@ fun AppSearchScreen() {
                                                     val fileName = selectedUploadName
 
                                                     if (uri == null || fileName == null) {
-                                                        uploadStatus = "Selecciona primero un archivo APK."
+                                                        uploadStatus = "No has seleccionado ningún APK. Pulsa Seleccionar y elige un archivo antes de subirlo."
+                                                        uploadStatusKind = ApkUploadStatusKind.ERROR
                                                         return@UploadApkCard
                                                     }
 
                                                     coroutineScope.launch {
                                                         isUploadingApk = true
-                                                        uploadStatus = "Subiendo APK... Registrando versión..."
+                                                        uploadStatus = "Registrando APK…\nSe está enviando el archivo al backend y procesando sus metadatos."
+                                                        uploadStatusKind = ApkUploadStatusKind.LOADING
 
                                                         try {
                                                             val result = PiCheckApiClient.uploadApk(
@@ -496,17 +594,15 @@ fun AppSearchScreen() {
                                                                 uri = uri,
                                                                 fileName = fileName,
                                                             )
-                                                            uploadStatus = if (result.contains("ya estaba registrada")) {
-                                                                "La versión ya estaba registrada: $result"
-                                                            } else {
-                                                                "APK registrado correctamente: $result"
-                                                            }
+                                                            uploadStatus = result.successMessage()
+                                                            uploadStatusKind = ApkUploadStatusKind.SUCCESS
                                                             selectedUploadUri = null
                                                             selectedUploadName = null
                                                             refreshRegisteredApps(showLoadingIndicator = true)
                                                             currentMode = AppListMode.REGISTERED
                                                         } catch (exception: Exception) {
-                                                            uploadStatus = "Error al subir APK: ${exception.message}"
+                                                            uploadStatus = "No se ha podido registrar el APK. ${exception.message ?: "Inténtalo de nuevo."}"
+                                                            uploadStatusKind = ApkUploadStatusKind.ERROR
                                                         } finally {
                                                             isUploadingApk = false
                                                         }
@@ -539,7 +635,8 @@ fun AppSearchScreen() {
                                                     onUpload = {
                                                         coroutineScope.launch {
                                                             isUploadingApk = true
-                                                            uploadStatus = "Subiendo APK base de ${deviceApp.name}..."
+                                                            uploadStatus = "Registrando APK…\nSe está enviando ${deviceApp.name} al backend y procesando sus metadatos."
+                                                            uploadStatusKind = ApkUploadStatusKind.LOADING
 
                                                             try {
                                                                 val result = PiCheckApiClient.uploadApkFile(
@@ -547,15 +644,13 @@ fun AppSearchScreen() {
                                                                     fileName = "${deviceApp.packageName}.apk",
                                                                     title = deviceApp.name,
                                                                 )
-                                                                uploadStatus = if (result.contains("ya estaba registrada")) {
-                                                                    "La versión ya estaba registrada: $result"
-                                                                } else {
-                                                                    "APK registrado correctamente: $result"
-                                                                }
+                                                                uploadStatus = result.successMessage()
+                                                                uploadStatusKind = ApkUploadStatusKind.SUCCESS
                                                                 refreshRegisteredApps(showLoadingIndicator = true)
                                                                 currentMode = AppListMode.REGISTERED
                                                             } catch (exception: Exception) {
-                                                                uploadStatus = "Error al subir ${deviceApp.name}: ${exception.message}"
+                                                                uploadStatus = "No se ha podido registrar el APK de ${deviceApp.name}. ${exception.message ?: "Inténtalo de nuevo."}"
+                                                                uploadStatusKind = ApkUploadStatusKind.ERROR
                                                             } finally {
                                                                 isUploadingApk = false
                                                             }
@@ -580,6 +675,7 @@ fun AppSearchScreen() {
 private fun PiCheckHeader(
     currentMode: AppListMode,
     onModeSelected: (AppListMode) -> Unit,
+    onHistoryClick: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -594,6 +690,15 @@ private fun PiCheckHeader(
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
                 )
+            },
+            actions = {
+                IconButton(onClick = onHistoryClick) {
+                    Icon(
+                        imageVector = Icons.Filled.History,
+                        contentDescription = "Historial de comparativas",
+                        tint = Color.White,
+                    )
+                }
             },
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = PiCheckBurgundy,
@@ -718,6 +823,7 @@ private fun HeaderSectionTab(
 private fun UploadApkCard(
     selectedFileName: String?,
     status: String,
+    statusKind: ApkUploadStatusKind,
     isUploading: Boolean,
     onPickFile: () -> Unit,
     onUpload: () -> Unit,
@@ -746,12 +852,10 @@ private fun UploadApkCard(
                 overflow = TextOverflow.Ellipsis,
             )
 
-            Text(
-                text = status,
-                color = PiCheckDarkText,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            UploadStatusPanel(
+                status = status,
+                statusKind = statusKind,
+                isUploading = isUploading,
             )
 
             Row(
@@ -772,7 +876,7 @@ private fun UploadApkCard(
 
                 Button(
                     onClick = onUpload,
-                    enabled = selectedFileName != null && !isUploading,
+                    enabled = !isUploading,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = PiCheckBlue,
                         contentColor = Color.White,
@@ -789,6 +893,74 @@ private fun UploadApkCard(
                         Text("Subir")
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UploadStatusPanel(
+    status: String,
+    statusKind: ApkUploadStatusKind,
+    isUploading: Boolean,
+) {
+    val style = when (statusKind) {
+        ApkUploadStatusKind.LOADING -> UploadStatusStyle(
+            backgroundColor = PiCheckBlue.copy(alpha = 0.08f),
+            borderColor = PiCheckBlue.copy(alpha = 0.35f),
+            title = "Registrando APK",
+            textColor = PiCheckDarkText,
+        )
+        ApkUploadStatusKind.SUCCESS -> UploadStatusStyle(
+            backgroundColor = PiCheckHCGreen.copy(alpha = 0.12f),
+            borderColor = PiCheckHCGreen.copy(alpha = 0.45f),
+            title = "Aplicación registrada correctamente",
+            textColor = PiCheckDarkText,
+        )
+        ApkUploadStatusKind.ERROR -> UploadStatusStyle(
+            backgroundColor = PiCheckBurgundy.copy(alpha = 0.10f),
+            borderColor = PiCheckBurgundy.copy(alpha = 0.45f),
+            title = "Error al registrar el APK",
+            textColor = PiCheckBurgundy,
+        )
+        ApkUploadStatusKind.INFO -> UploadStatusStyle(
+            backgroundColor = Color(0xFFF8F8FB),
+            borderColor = PiCheckCardBorder,
+            title = "Estado de subida",
+            textColor = PiCheckDarkText,
+        )
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, style.borderColor),
+        colors = CardDefaults.cardColors(containerColor = style.backgroundColor),
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (isUploading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = PiCheckBlue,
+                    strokeWidth = 2.dp,
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = style.title,
+                    color = style.textColor,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = status,
+                    color = style.textColor.copy(alpha = 0.82f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }

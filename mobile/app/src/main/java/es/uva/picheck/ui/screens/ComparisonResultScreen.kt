@@ -89,7 +89,11 @@ private enum class ComparisonTab { GENERAL, MASTG }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ComparisonResultScreen(result: PiCheckComparisonAnalysis, onNewComparison: () -> Unit) {
+fun ComparisonResultScreen(
+    result: PiCheckComparisonAnalysis,
+    onNewComparison: () -> Unit,
+    allowRemoteMastgIndexChange: Boolean = true,
+) {
     val dashboard = result.dashboard
     val (leftSide, rightSide) = comparisonSides(result, dashboard)
     val (leftColors, rightColors) = resolveComparisonColors(leftSide, rightSide)
@@ -126,6 +130,7 @@ fun ComparisonResultScreen(result: PiCheckComparisonAnalysis, onNewComparison: (
                                 rightSide = rightSide,
                                 leftColors = leftColors,
                                 rightColors = rightColors,
+                                allowRemoteIndexChange = allowRemoteMastgIndexChange,
                             )
                         }
                     }
@@ -395,7 +400,14 @@ private fun BarRow(title: String, valueLabel: String, value: Float?, maxValue: F
 }
 
 @Composable
-private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftSide: DashboardSide, rightSide: DashboardSide, leftColors: ComparisonSideColors, rightColors: ComparisonSideColors) {
+private fun MastgIndexTab(
+    dashboard: ComparisonDashboard?,
+    leftSide: DashboardSide,
+    rightSide: DashboardSide,
+    leftColors: ComparisonSideColors,
+    rightColors: ComparisonSideColors,
+    allowRemoteIndexChange: Boolean,
+) {
     val leftName = sideDisplayName(leftSide)
     val rightName = sideDisplayName(rightSide)
     val initialMastg = dashboard?.mastg
@@ -408,7 +420,13 @@ private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftSide: DashboardSi
     var loadingIndex by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(selectedIndexId, leftSide.appId, leftSide.version, rightSide.appId, rightSide.version) {
+    LaunchedEffect(selectedIndexId, leftSide.appId, leftSide.version, rightSide.appId, rightSide.version, allowRemoteIndexChange) {
+        if (!allowRemoteIndexChange) {
+            selectedMastg = initialMastg
+            loadError = null
+            loadingIndex = false
+            return@LaunchedEffect
+        }
         if (selectedIndexId == initialMastg?.indexId) {
             selectedMastg = initialMastg
             return@LaunchedEffect
@@ -447,7 +465,11 @@ private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftSide: DashboardSi
         DashboardCard {
             Text("Índice MASTG/PI-check", color = PiCheckBlue, fontWeight = FontWeight.ExtraBold)
             Text(
-                "Puedes cambiar el índice MASTG/PI-check para ver otro conjunto de pruebas sobre la misma comparativa.",
+                if (allowRemoteIndexChange) {
+                    "Puedes cambiar el índice MASTG/PI-check para ver otro conjunto de pruebas sobre la misma comparativa."
+                } else {
+                    "Comparativa cargada desde historial. Solo está disponible el índice guardado localmente."
+                },
                 color = PiCheckDarkText.copy(alpha = 0.76f),
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -465,12 +487,15 @@ private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftSide: DashboardSi
 
             Box(modifier = Modifier.fillMaxWidth()) {
                 Button(
-                    onClick = { expanded = true },
+                    onClick = { if (allowRemoteIndexChange) expanded = true },
+                    enabled = allowRemoteIndexChange,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = PiCheckBlue.copy(alpha = 0.10f),
                         contentColor = PiCheckBlue,
+                        disabledContainerColor = PiCheckBlue.copy(alpha = 0.08f),
+                        disabledContentColor = PiCheckDarkText,
                     ),
                 ) {
                     Column(
@@ -485,43 +510,54 @@ private fun MastgIndexTab(dashboard: ComparisonDashboard?, leftSide: DashboardSi
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            selectedTestCount?.let { "$it pruebas · toca para cambiar" }
-                                ?: "Toca para cambiar de índice",
+                            selectedTestCount?.let { count ->
+                                if (allowRemoteIndexChange) {
+                                    "$count pruebas · toca para cambiar"
+                                } else {
+                                    "$count pruebas · guardado local"
+                                }
+                            } ?: if (allowRemoteIndexChange) {
+                                "Toca para cambiar de índice"
+                            } else {
+                                "Índice guardado localmente"
+                            },
                             color = PiCheckDarkText.copy(alpha = 0.65f),
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
 
                     Text(
-                        "Cambiar ▾",
+                        if (allowRemoteIndexChange) "Cambiar ▾" else "Historial",
                         color = PiCheckBlue,
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
 
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    options.forEach { option ->
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(
-                                        option.name,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = PiCheckDarkText,
-                                    )
-                                    Text(
-                                        "${option.testCount ?: 0} pruebas",
-                                        color = PiCheckModelNeutral,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            },
-                            onClick = {
-                                selectedIndexId = option.id
-                                expanded = false
-                            },
-                        )
+                if (allowRemoteIndexChange) {
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        options.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(
+                                            option.name,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = PiCheckDarkText,
+                                        )
+                                        Text(
+                                            "${option.testCount ?: 0} pruebas",
+                                            color = PiCheckModelNeutral,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedIndexId = option.id
+                                    expanded = false
+                                },
+                            )
+                        }
                     }
                 }
             }
